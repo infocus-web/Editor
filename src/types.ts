@@ -64,3 +64,29 @@ export interface RegionBox {
   width: number;
   height: number;
 }
+
+export interface ChatMessage {
+  id: string;
+  sender: 'user' | 'gemini' | 'chatgpt';
+  content: string;
+  timestamp: number;
+  image?: string;
+  generatedImage?: string;
+  model?: string;
+  executionTimeMs?: number;
+  isError?: boolean;
+  simulated?: boolean;
+}
+
+export interface AuthAccount {
+  email: string;
+  name: string;
+  avatar?: string;
+  isLoggedIn: boolean;
+  apiKey?: string;
+}
+
+export interface DualAuthState {
+  gemini: AuthAccount;
+  chatgpt: AuthAccount;
+}

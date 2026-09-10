@@ -2,45 +2,55 @@ import React, { useState, useEffect } from 'react';
 import {
   Sparkles,
   Zap,
-  Settings2,
   Key,
-  Trophy,
-  Download,
-  RotateCcw,
-  Layers,
-  ArrowRight,
   ShieldCheck,
-  Split,
-  Eye,
-  Camera,
+  RotateCcw,
+  Sliders,
+  Send,
+  LogIn,
+  Check,
 } from 'lucide-react';
 import {
-  ProviderId,
-  ProviderResultState,
-  UserApiKeys,
   SamplePortrait,
-  LightboxState,
-  RegionEditState,
+  ChatMessage,
+  DualAuthState,
 } from './types';
 import { UploadZone } from './components/UploadZone';
 import { PromptEditor, MASTER_PROMPT_DEFAULT } from './components/PromptEditor';
-import { ProviderSelector } from './components/ProviderSelector';
-import { ProviderCard } from './components/ProviderCard';
-import { SettingsModal } from './components/SettingsModal';
-import { LightboxModal } from './components/LightboxModal';
-import { RegionEditorModal } from './components/RegionEditorModal';
-import { ExecutionSpeedSummary } from './components/ExecutionSpeedSummary';
-import { simulateRestoration } from './utils/imageSimulation';
-import { SAMPLE_PORTRAITS } from './utils/samples';
+import { DualChatView } from './components/DualChatView';
+import { DualAuthModal } from './components/DualAuthModal';
 
-const INITIAL_PROVIDERS: ProviderId[] = ['google', 'openai', 'stability', 'replicate'];
+const DEFAULT_AUTH: DualAuthState = {
+  gemini: {
+    email: 'alderpol@gmail.com',
+    name: 'Usuario Google',
+    isLoggedIn: true,
+    avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80',
+  },
+  chatgpt: {
+    email: 'alderpol@openai.com',
+    name: 'Usuario ChatGPT',
+    isLoggedIn: false,
+    avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&auto=format&fit=crop&q=80',
+  },
+};
 
-const PROVIDER_INFO: Record<ProviderId, { name: string; model: string }> = {
-  google: { name: 'Google Imagen 3', model: 'imagen-3.0-generate-002' },
-  openai: { name: 'OpenAI DALL-E 3', model: 'dall-e-3 / gpt-image' },
-  stability: { name: 'Stability AI', model: 'SD3.5 Large / SDXL' },
-  replicate: { name: 'Replicate (CodeFormer)', model: 'sczhou/codeformer' },
-  fal: { name: 'Fal.ai (Flux.1 Dev)', model: 'fal-ai/flux-realism' },
+const INITIAL_GEMINI_MESSAGE: ChatMessage = {
+  id: 'g-welcome',
+  sender: 'gemini',
+  content:
+    '¡Hola! Soy Google Gemini. Puedo analizar tu retrato con visión computacional de alta resolución, restaurar detalles faciales perdidos con fidelidad absoluta y aplicar estilos de época fotográfica (85mm, Kodachrome, daguerrotipo).\n\nHaz clic en cualquier foto de ejemplo a la izquierda o escribe un mensaje para enviarlo en paralelo.',
+  timestamp: Date.now(),
+  model: 'gemini-3.8-flash',
+};
+
+const INITIAL_CHATGPT_MESSAGE: ChatMessage = {
+  id: 'c-welcome',
+  sender: 'chatgpt',
+  content:
+    '¡Hola! Soy ChatGPT con GPT-4o. Estoy configurado para examinar fotos antiguas, diagnosticar velos sepia, grano y arañazos, y guiar remasterizaciones ópticas de nivel profesional.\n\nAl seleccionar una muestra o escribir en la barra inferior, recibiré tu prompt simultáneamente junto a Gemini.',
+  timestamp: Date.now(),
+  model: 'gpt-4o',
 };
 
 export default function App() {
@@ -48,115 +58,164 @@ export default function App() {
   const [imageMeta, setImageMeta] = useState<{ name: string; size: string } | null>(null);
   const [selectedSampleId, setSelectedSampleId] = useState<string | null>(null);
   const [prompt, setPrompt] = useState<string>(MASTER_PROMPT_DEFAULT);
-  const [selectedProviders, setSelectedProviders] = useState<ProviderId[]>(INITIAL_PROVIDERS);
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [isGeneratingAll, setIsGeneratingAll] = useState(false);
-  const [winnerId, setWinnerId] = useState<string | null>(null);
   const [activeStyleTitle, setActiveStyleTitle] = useState<string | null>(null);
   const [lastPastedSampleTitle, setLastPastedSampleTitle] = useState<string | null>(null);
 
-  // User API Keys stored in localStorage
-  const [apiKeys, setApiKeys] = useState<UserApiKeys>({
-    google: '',
-    openai: '',
-    stability: '',
-    replicate: '',
-    fal: '',
-  });
+  // Dual Chat Messages & State
+  const [geminiMessages, setGeminiMessages] = useState<ChatMessage[]>([INITIAL_GEMINI_MESSAGE]);
+  const [chatgptMessages, setChatgptMessages] = useState<ChatMessage[]>([INITIAL_CHATGPT_MESSAGE]);
+  const [isGeminiLoading, setIsGeminiLoading] = useState(false);
+  const [isChatgptLoading, setIsChatgptLoading] = useState(false);
 
-  // Results state per provider
-  const [providerResults, setProviderResults] = useState<Record<ProviderId, ProviderResultState>>({
-    google: {
-      id: 'google',
-      name: PROVIDER_INFO.google.name,
-      model: PROVIDER_INFO.google.model,
-      status: 'idle',
-    },
-    openai: {
-      id: 'openai',
-      name: PROVIDER_INFO.openai.name,
-      model: PROVIDER_INFO.openai.model,
-      status: 'idle',
-    },
-    stability: {
-      id: 'stability',
-      name: PROVIDER_INFO.stability.name,
-      model: PROVIDER_INFO.stability.model,
-      status: 'idle',
-    },
-    replicate: {
-      id: 'replicate',
-      name: PROVIDER_INFO.replicate.name,
-      model: PROVIDER_INFO.replicate.model,
-      status: 'idle',
-    },
-    fal: {
-      id: 'fal',
-      name: PROVIDER_INFO.fal.name,
-      model: PROVIDER_INFO.fal.model,
-      status: 'idle',
-    },
-  });
+  // Model selectors
+  const [geminiModel, setGeminiModel] = useState('gemini-3.8-flash');
+  const [chatgptModel, setChatgptModel] = useState('gpt-4o');
 
-  // Lightbox Modal state
-  const [lightbox, setLightbox] = useState<LightboxState>({
-    isOpen: false,
-    originalImage: '',
-    restoredImage: '',
-    zoom: 1,
-  });
-
-  // Region Editor Modal state (Targeted Inpainting)
-  const [regionEditor, setRegionEditor] = useState<RegionEditState>({
-    isOpen: false,
-    providerId: 'google',
-    providerName: 'Google Imagen 3',
-    image: '',
-  });
-
-  // Load stored API keys on mount
-  useEffect(() => {
+  // Auth State
+  const [authState, setAuthState] = useState<DualAuthState>(() => {
     try {
-      const stored = localStorage.getItem('multi_ai_keys');
-      if (stored) {
-        setApiKeys(JSON.parse(stored));
-      }
-    } catch (e) {
-      console.error('Error loading API keys from localStorage', e);
+      const stored = localStorage.getItem('dual_chat_auth');
+      return stored ? JSON.parse(stored) : DEFAULT_AUTH;
+    } catch {
+      return DEFAULT_AUTH;
     }
-  }, []);
+  });
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
 
-  const handleSaveKeys = (newKeys: UserApiKeys) => {
-    setApiKeys(newKeys);
+  const handleUpdateAuth = (newAuth: DualAuthState) => {
+    setAuthState(newAuth);
     try {
-      localStorage.setItem('multi_ai_keys', JSON.stringify(newKeys));
+      localStorage.setItem('dual_chat_auth', JSON.stringify(newAuth));
     } catch (e) {
-      console.error('Error saving API keys', e);
+      console.error('Error saving auth to localStorage', e);
     }
   };
 
-  const handleToggleProvider = (id: ProviderId) => {
-    setSelectedProviders((prev) => {
-      if (prev.includes(id)) {
-        if (prev.length === 1) return prev; // Keep at least one
-        return prev.filter((p) => p !== id);
-      } else {
-        return [...prev, id];
+  // Dispatch message to Gemini
+  const sendToGemini = async (promptText: string, imageToUse: string | null) => {
+    setIsGeminiLoading(true);
+    const userMsgId = 'u-gem-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
+    const userMsg: ChatMessage = {
+      id: userMsgId,
+      sender: 'user',
+      content: promptText,
+      image: imageToUse || undefined,
+      timestamp: Date.now(),
+    };
+    setGeminiMessages((prev) => [...prev, userMsg]);
+
+    try {
+      const res = await fetch('/api/chat/gemini', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: promptText,
+          image: imageToUse,
+          model: geminiModel,
+          customKey: authState.gemini.apiKey || undefined,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Error al comunicarse con Gemini');
       }
-    });
+
+      const botMsg: ChatMessage = {
+        id: 'g-' + Date.now(),
+        sender: 'gemini',
+        content: data.reply || 'Respuesta generada por Gemini.',
+        generatedImage: data.generatedImage,
+        model: data.model || geminiModel,
+        executionTimeMs: data.executionTimeMs,
+        timestamp: Date.now(),
+      };
+      setGeminiMessages((prev) => [...prev, botMsg]);
+    } catch (err: any) {
+      const errMsg: ChatMessage = {
+        id: 'g-err-' + Date.now(),
+        sender: 'gemini',
+        content: `❌ Error en Gemini: ${err.message}`,
+        isError: true,
+        timestamp: Date.now(),
+      };
+      setGeminiMessages((prev) => [...prev, errMsg]);
+    } finally {
+      setIsGeminiLoading(false);
+    }
   };
 
-  // When clicking an example image: only generate and paste its specialized prompt into the prompt box
+  // Dispatch message to ChatGPT
+  const sendToChatgpt = async (promptText: string, imageToUse: string | null) => {
+    setIsChatgptLoading(true);
+    const userMsgId = 'u-gpt-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
+    const userMsg: ChatMessage = {
+      id: userMsgId,
+      sender: 'user',
+      content: promptText,
+      image: imageToUse || undefined,
+      timestamp: Date.now(),
+    };
+    setChatgptMessages((prev) => [...prev, userMsg]);
+
+    try {
+      const res = await fetch('/api/chat/chatgpt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: promptText,
+          image: imageToUse,
+          model: chatgptModel,
+          customKey: authState.chatgpt.apiKey || undefined,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Error al comunicarse con ChatGPT');
+      }
+
+      const botMsg: ChatMessage = {
+        id: 'c-' + Date.now(),
+        sender: 'chatgpt',
+        content: data.reply || 'Respuesta generada por ChatGPT.',
+        model: data.model || chatgptModel,
+        executionTimeMs: data.executionTimeMs,
+        simulated: data.simulated,
+        timestamp: Date.now(),
+      };
+      setChatgptMessages((prev) => [...prev, botMsg]);
+    } catch (err: any) {
+      const errMsg: ChatMessage = {
+        id: 'c-err-' + Date.now(),
+        sender: 'chatgpt',
+        content: `❌ Error en ChatGPT: ${err.message}`,
+        isError: true,
+        timestamp: Date.now(),
+      };
+      setChatgptMessages((prev) => [...prev, errMsg]);
+    } finally {
+      setIsChatgptLoading(false);
+    }
+  };
+
+  // Send concurrently to BOTH Gemini & ChatGPT
+  const handleSendToBoth = (promptText: string) => {
+    if (!promptText.trim()) return;
+    sendToGemini(promptText, originalImage);
+    sendToChatgpt(promptText, originalImage);
+  };
+
+  // When clicking an example image: paste its prompt AND dispatch to both chats simultaneously!
   const handleApplySamplePrompt = (sample: SamplePortrait) => {
     setSelectedSampleId(sample.id);
     setPrompt(sample.fullPrompt);
     setActiveStyleTitle(sample.title);
     setLastPastedSampleTitle(sample.title);
 
-    // Copy to clipboard as bonus convenience
-    if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(sample.fullPrompt).catch(() => {});
-    }
+    // Immediate concurrent dispatch to both chats!
+    sendToGemini(sample.fullPrompt, originalImage);
+    sendToChatgpt(sample.fullPrompt, originalImage);
 
     // Auto-clear toast notice after 3 seconds
     setTimeout(() => {
@@ -164,7 +223,7 @@ export default function App() {
     }, 3000);
   };
 
-  // Optional: only if user explicitly clicks "Cargar foto" to test with the sample image
+  // Optional: load sample image if user has no photo
   const handleLoadSampleImage = (sample: SamplePortrait) => {
     setSelectedSampleId(sample.id);
     setImageMeta({ name: sample.title, size: 'Muestra Web' });
@@ -185,262 +244,67 @@ export default function App() {
     img.src = sample.url;
   };
 
-  // Concurrent Execution via Promise.allSettled
-  const handleGenerateAll = async () => {
-    if (!originalImage) {
-      alert('Por favor carga una fotografía antes de generar.');
-      return;
-    }
-    if (selectedProviders.length === 0) {
-      alert('Selecciona al menos un proveedor de IA.');
-      return;
-    }
-
-    setIsGeneratingAll(true);
-    setWinnerId(null);
-
-    // Set selected cards to loading
-    setProviderResults((prev) => {
-      const updated = { ...prev };
-      selectedProviders.forEach((id) => {
-        updated[id] = {
-          ...updated[id],
-          status: 'loading',
-          error: undefined,
-        };
-      });
-      return updated;
-    });
-
-    try {
-      // Send concurrent request to backend
-      const response = await fetch('/api/restore-concurrent', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          image: originalImage,
-          prompt,
-          providers: selectedProviders,
-          keys: apiKeys,
-        }),
-      });
-
-      const data = await response.json();
-
-      if (response.ok && data.results) {
-        // Process results
-        for (const item of data.results) {
-          const id = item.providerId as ProviderId;
-
-          // If result status was simulated, generate crisp client-side preview
-          let finalImg = item.imageUrl;
-          if (item.status === 'simulated' && !finalImg) {
-            finalImg = await simulateRestoration(originalImage, id, prompt);
-          }
-
-          setProviderResults((prev) => ({
-            ...prev,
-            [id]: {
-              id,
-              name: item.providerName || PROVIDER_INFO[id]?.name || id,
-              model: item.modelName || PROVIDER_INFO[id]?.model || '',
-              status: item.status,
-              imageUrl: finalImg,
-              executionTimeMs: item.executionTimeMs,
-              error: item.error,
-              notes: item.notes,
-            },
-          }));
-        }
-      } else {
-        throw new Error(data.error || 'Error al conectar con el servidor.');
-      }
-    } catch (err: any) {
-      console.error('[CONCURRENT_ERROR]', err);
-      // Fallback: run simulated restoration locally for each so the user can inspect results
-      for (const id of selectedProviders) {
-        const simImg = await simulateRestoration(originalImage, id, prompt);
-        setProviderResults((prev) => ({
-          ...prev,
-          [id]: {
-            ...prev[id],
-            status: 'simulated',
-            imageUrl: simImg,
-            executionTimeMs: 1200,
-            notes: 'Filtro de simulación en canvas aplicado.',
-          },
-        }));
-      }
-    } finally {
-      setIsGeneratingAll(false);
-    }
+  const handleClearChats = () => {
+    setGeminiMessages([INITIAL_GEMINI_MESSAGE]);
+    setChatgptMessages([INITIAL_CHATGPT_MESSAGE]);
   };
-
-  // Retry a single card
-  const handleRetrySingle = async (providerId: string) => {
-    if (!originalImage) return;
-    const id = providerId as ProviderId;
-
-    setProviderResults((prev) => ({
-      ...prev,
-      [id]: { ...prev[id], status: 'loading', error: undefined },
-    }));
-
-    try {
-      const response = await fetch('/api/restore-single', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          providerId: id,
-          image: originalImage,
-          prompt,
-          customKey: apiKeys[id as keyof UserApiKeys],
-        }),
-      });
-      const data = await response.json();
-
-      if (response.ok && data.result) {
-        let finalImg = data.result.imageUrl;
-        if (data.result.status === 'simulated' && !finalImg) {
-          finalImg = await simulateRestoration(originalImage, id, prompt);
-        }
-        setProviderResults((prev) => ({
-          ...prev,
-          [id]: {
-            ...prev[id],
-            status: data.result.status,
-            imageUrl: finalImg,
-            executionTimeMs: data.result.executionTimeMs,
-            error: data.result.error,
-            notes: data.result.notes,
-          },
-        }));
-      } else {
-        throw new Error(data.error || 'Error al reintentar proveedor.');
-      }
-    } catch (err: any) {
-      const simImg = await simulateRestoration(originalImage, id, prompt);
-      setProviderResults((prev) => ({
-        ...prev,
-        [id]: {
-          ...prev[id],
-          status: 'simulated',
-          imageUrl: simImg,
-          error: undefined,
-          notes: 'Simulación aplicada.',
-        },
-      }));
-    }
-  };
-
-  // Open inspection modal
-  const handleOpenLightbox = (result: ProviderResultState) => {
-    if (!originalImage || !result.imageUrl) return;
-    setLightbox({
-      isOpen: true,
-      providerId: result.id,
-      providerName: result.name,
-      modelName: result.model,
-      originalImage,
-      restoredImage: result.imageUrl,
-      zoom: 1,
-    });
-  };
-
-  // Download image file
-  const handleDownload = (url: string, filename: string) => {
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-  };
-
-  // Mark winner
-  const handleSelectWinner = (id: string) => {
-    setWinnerId((prev) => (prev === id ? null : id));
-  };
-
-  // Open region editor
-  const handleOpenRegionEditor = (result: ProviderResultState) => {
-    if (!result.imageUrl) return;
-    setRegionEditor({
-      isOpen: true,
-      providerId: result.id,
-      providerName: result.name,
-      image: result.imageUrl,
-    });
-  };
-
-  const handleOpenRegionEditorFromLightbox = (
-    providerId: ProviderId,
-    image: string,
-    providerName: string
-  ) => {
-    setRegionEditor({
-      isOpen: true,
-      providerId,
-      providerName,
-      image,
-    });
-  };
-
-  // Save modified inpaint image
-  const handleSaveModifiedImage = (providerId: ProviderId, newImageUrl: string) => {
-    setProviderResults((prev) => ({
-      ...prev,
-      [providerId]: {
-        ...prev[providerId],
-        imageUrl: newImageUrl,
-        notes: 'Área retocada con inpainting.',
-      },
-    }));
-  };
-
-  // Count active keys
-  const configuredKeysCount = Object.values(apiKeys).filter(
-    (k) => typeof k === 'string' && Boolean(k.trim())
-  ).length;
 
   return (
-    <div className="min-h-screen bg-neutral-950 text-neutral-100 flex flex-col font-sans selection:bg-amber-400/30 selection:text-amber-200">
-      {/* Top Navigation Header */}
-      <header className="border-b border-neutral-800/80 bg-neutral-900/80 backdrop-blur-md sticky top-0 z-30">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+    <div className="min-h-screen bg-neutral-950 text-neutral-100 flex flex-col selection:bg-amber-400/20 selection:text-amber-200">
+      {/* Global Navigation Header */}
+      <header className="sticky top-0 z-40 bg-neutral-950/80 backdrop-blur-md border-b border-neutral-800/80 px-4 sm:px-6 py-3">
+        <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-amber-500 to-amber-300 p-0.5 shadow-md flex items-center justify-center text-neutral-950">
-              <Camera className="w-5 h-5 stroke-[2.2]" />
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-500 via-amber-400 to-emerald-500 p-0.5 shadow-lg shadow-amber-500/10">
+              <div className="w-full h-full bg-neutral-950 rounded-[10px] flex items-center justify-center text-amber-400">
+                <Sparkles className="w-5 h-5" />
+              </div>
             </div>
             <div>
               <div className="flex items-center space-x-2">
-                <h1 className="text-base font-bold text-neutral-100 tracking-tight">
-                  Multi-AI Photo Restorer & Comparator
+                <h1 className="text-sm sm:text-base font-bold tracking-tight text-neutral-100">
+                  Dual AI Chat: Gemini + ChatGPT
                 </h1>
-                <span className="hidden sm:inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-400/10 text-amber-300 border border-amber-400/20">
-                  Concurrente
+                <span className="hidden sm:inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-400/10 text-emerald-300 border border-emerald-400/20">
+                  En Vivo Simultáneo
                 </span>
               </div>
               <p className="text-xs text-neutral-400 hidden sm:block">
-                Compara en paralelo Google Imagen 3, OpenAI DALL-E, Stability AI y Replicate/Fal
+                Envía tus prompts a Google Gemini y OpenAI ChatGPT al mismo tiempo con dos ventanas de chat sincronizadas
               </p>
             </div>
           </div>
 
-          {/* Right Action Bar */}
+          {/* Right Header: Login Status & Management */}
           <div className="flex items-center space-x-2.5">
-            <button
-              id="header-settings-btn"
-              onClick={() => setIsSettingsOpen(true)}
-              className="px-3 py-1.5 rounded-xl bg-neutral-900 hover:bg-neutral-800 text-xs font-medium text-neutral-300 border border-neutral-700/80 flex items-center space-x-2 transition-all hover:border-neutral-600 shadow-sm"
+            {/* Quick Gemini status */}
+            <div
+              onClick={() => setIsAuthModalOpen(true)}
+              className="hidden md:flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-blue-950/40 border border-blue-800/50 text-[11px] text-blue-300 cursor-pointer hover:bg-blue-900/40 transition-colors"
+              title="Cuenta Google Gemini"
             >
-              <Key className="w-3.5 h-3.5 text-amber-400" />
-              <span>Claves API</span>
-              {configuredKeysCount > 0 && (
-                <span className="w-4 h-4 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] flex items-center justify-center font-bold">
-                  {configuredKeysCount}
-                </span>
-              )}
+              <span className="w-1.5 h-1.5 rounded-full bg-blue-400"></span>
+              <span>Gemini: {authState.gemini.isLoggedIn ? 'Conectado' : 'Sin sesión'}</span>
+            </div>
+
+            {/* Quick ChatGPT status */}
+            <div
+              onClick={() => setIsAuthModalOpen(true)}
+              className="hidden md:flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-emerald-950/40 border border-emerald-800/50 text-[11px] text-emerald-300 cursor-pointer hover:bg-emerald-900/40 transition-colors"
+              title="Cuenta OpenAI ChatGPT"
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+              <span>ChatGPT: {authState.chatgpt.isLoggedIn ? 'Conectado' : 'Sin sesión'}</span>
+            </div>
+
+            {/* Main Auth Button */}
+            <button
+              id="header-auth-btn"
+              onClick={() => setIsAuthModalOpen(true)}
+              className="px-3 py-1.5 rounded-xl bg-neutral-900 hover:bg-neutral-800 text-xs font-medium text-neutral-200 border border-neutral-700/80 flex items-center space-x-2 transition-all hover:border-neutral-600 shadow-sm"
+            >
+              <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
+              <span>Login & Cuentas</span>
             </button>
           </div>
         </div>
@@ -449,14 +313,14 @@ export default function App() {
       {/* Main Workspace Layout */}
       <main className="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-6">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* Left Column: Upload & Master Controls (5 cols) */}
-          <div className="lg:col-span-5 space-y-5">
+          {/* Left Column: Photo Upload & Samples Presets (4 cols) */}
+          <div className="lg:col-span-4 space-y-4">
             {/* Upload Zone */}
             <div className="p-4 rounded-2xl bg-neutral-900/60 border border-neutral-800/80 shadow-sm">
               <div className="flex items-center justify-between mb-3">
                 <h2 className="text-xs font-semibold text-neutral-300 uppercase tracking-wider flex items-center space-x-1.5">
                   <span className="w-2 h-2 rounded-full bg-amber-400"></span>
-                  <span>1. Cargar Retrato Vintage / Dañado</span>
+                  <span>1. Retrato para Análisis & Restauración</span>
                 </h2>
                 {imageMeta && (
                   <span className="text-[11px] text-neutral-400 font-mono">{imageMeta.size}</span>
@@ -497,170 +361,55 @@ export default function App() {
                 }}
                 activeStyleTitle={activeStyleTitle}
               />
-            </div>
 
-            {/* Provider Selector Checkboxes */}
-            <div className="p-4 rounded-2xl bg-neutral-900/60 border border-neutral-800/80 shadow-sm">
-              <ProviderSelector
-                selectedProviders={selectedProviders}
-                onToggleProvider={handleToggleProvider}
-                keys={apiKeys}
-                onOpenSettings={() => setIsSettingsOpen(true)}
-              />
+              {/* Instant Dispatch Button from Prompt Box */}
+              <button
+                type="button"
+                onClick={() => handleSendToBoth(prompt)}
+                disabled={!prompt.trim() || isGeminiLoading || isChatgptLoading}
+                className="w-full mt-3 py-2.5 px-4 rounded-xl text-xs font-bold bg-amber-400 hover:bg-amber-300 text-neutral-950 flex items-center justify-center space-x-2 transition-all shadow-md shadow-amber-400/10 disabled:opacity-40 disabled:cursor-not-allowed active:scale-[0.99]"
+              >
+                <Send className="w-3.5 h-3.5" />
+                <span>Enviar este Prompt a Ambos Chats</span>
+              </button>
             </div>
-
-            {/* Master Action Button */}
-            <button
-              id="generate-all-btn"
-              onClick={handleGenerateAll}
-              disabled={!originalImage || isGeneratingAll || selectedProviders.length === 0}
-              className={`w-full py-3.5 px-5 rounded-2xl font-semibold text-sm flex items-center justify-center space-x-2.5 transition-all shadow-xl ${
-                !originalImage || selectedProviders.length === 0
-                  ? 'bg-neutral-800 text-neutral-500 cursor-not-allowed border border-neutral-700/40'
-                  : isGeneratingAll
-                  ? 'bg-amber-500 text-neutral-950 animate-pulse'
-                  : 'bg-amber-400 hover:bg-amber-300 text-neutral-950 shadow-amber-400/10 hover:shadow-amber-400/20 active:scale-[0.99]'
-              }`}
-            >
-              {isGeneratingAll ? (
-                <>
-                  <div className="w-4 h-4 rounded-full border-2 border-neutral-950 border-t-transparent animate-spin" />
-                  <span>Despachando {selectedProviders.length} IAs en paralelo...</span>
-                </>
-              ) : (
-                <>
-                  <Zap className="w-4 h-4 fill-current" />
-                  <span>Generar y Restaurar Todo ({selectedProviders.length} IAs)</span>
-                </>
-              )}
-            </button>
           </div>
 
-          {/* Right Column: Split Screen Comparison Grid (7 cols) */}
-          <div className="lg:col-span-7 space-y-4">
-            {/* Speed & Execution Time Benchmark Bar Chart */}
-            <ExecutionSpeedSummary
-              selectedProviders={selectedProviders}
-              providerResults={providerResults}
-              isGenerating={isGeneratingAll}
+          {/* Right Column: Dual Side-by-Side Live Chat (8 cols) */}
+          <div className="lg:col-span-8">
+            <DualChatView
+              geminiMessages={geminiMessages}
+              chatgptMessages={chatgptMessages}
+              isGeminiLoading={isGeminiLoading}
+              isChatgptLoading={isChatgptLoading}
+              onSendToBoth={handleSendToBoth}
+              onSendToGeminiOnly={(p) => sendToGemini(p, originalImage)}
+              onSendToChatgptOnly={(p) => sendToChatgpt(p, originalImage)}
+              onClearChats={handleClearChats}
+              attachedImage={originalImage}
+              onRemoveAttachedImage={() => {
+                setOriginalImage(null);
+                setImageMeta(null);
+              }}
+              authState={authState}
+              onOpenAuthModal={() => setIsAuthModalOpen(true)}
+              currentPrompt={prompt}
+              onChangePrompt={setPrompt}
+              geminiModel={geminiModel}
+              setGeminiModel={setGeminiModel}
+              chatgptModel={chatgptModel}
+              setChatgptModel={setChatgptModel}
             />
-
-            {/* Dashboard Header Bar */}
-            <div className="flex items-center justify-between p-3.5 rounded-2xl bg-neutral-900/60 border border-neutral-800/80">
-              <div className="flex items-center space-x-2">
-                <Split className="w-4 h-4 text-amber-400" />
-                <h3 className="text-xs font-semibold text-neutral-200 uppercase tracking-wider">
-                  Panel de Comparación Simultánea
-                </h3>
-              </div>
-              {winnerId && (
-                <div className="flex items-center space-x-1.5 px-3 py-1 rounded-xl bg-amber-500/10 text-amber-300 border border-amber-500/20 text-xs font-medium">
-                  <Trophy className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
-                  <span>Ganadora: {providerResults[winnerId as ProviderId]?.name}</span>
-                </div>
-              )}
-            </div>
-
-            {/* Split Screen Container */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Left Side: Original Image Sticky Preview */}
-              <div className="flex flex-col rounded-2xl border border-neutral-800/90 bg-neutral-900/80 overflow-hidden shadow-sm md:sticky md:top-24 max-h-[480px]">
-                <div className="flex items-center justify-between px-4 py-2.5 border-b border-neutral-800 bg-neutral-900/90">
-                  <span className="text-xs font-semibold text-neutral-300 flex items-center space-x-1.5">
-                    <span className="w-2 h-2 rounded-full bg-neutral-400"></span>
-                    <span>ORIGINAL (Entrada Única)</span>
-                  </span>
-                  {originalImage && (
-                    <button
-                      id="view-original-full-btn"
-                      onClick={() =>
-                        handleOpenLightbox({
-                          id: 'google',
-                          name: 'Original',
-                          model: 'Entrada base',
-                          status: 'success',
-                          imageUrl: originalImage,
-                        })
-                      }
-                      className="text-[11px] text-neutral-400 hover:text-white flex items-center space-x-1"
-                    >
-                      <Eye className="w-3 h-3" />
-                      <span>Inspeccionar</span>
-                    </button>
-                  )}
-                </div>
-
-                <div className="relative aspect-[4/3] w-full bg-neutral-950 flex items-center justify-center p-2 overflow-hidden">
-                  {originalImage ? (
-                    <img
-                      src={originalImage}
-                      alt="Original subida"
-                      referrerPolicy="no-referrer"
-                      className="max-h-full max-w-full object-contain rounded-lg"
-                    />
-                  ) : (
-                    <div className="text-center p-6 text-neutral-600 flex flex-col items-center">
-                      <Camera className="w-8 h-8 mb-2 stroke-1 text-neutral-700" />
-                      <p className="text-xs text-neutral-400">Sin imagen cargada</p>
-                      <p className="text-[11px] text-neutral-600 mt-0.5">
-                        Arrastra una foto a la izquierda
-                      </p>
-                    </div>
-                  )}
-                </div>
-
-                <div className="p-3 bg-neutral-900 border-t border-neutral-800 text-[11px] text-neutral-400 flex items-center justify-between">
-                  <span>Referencia constante para pixel-peeping</span>
-                  <span className="font-mono text-neutral-500">100% Sin Modificar</span>
-                </div>
-              </div>
-
-              {/* Right Side: Generated AI Cards Grid */}
-              <div className="space-y-4">
-                {selectedProviders.map((id) => (
-                  <ProviderCard
-                    key={id}
-                    result={providerResults[id]}
-                    onOpenLightbox={handleOpenLightbox}
-                    onOpenRegionEditor={handleOpenRegionEditor}
-                    onDownload={handleDownload}
-                    onSelectWinner={handleSelectWinner}
-                    onRetrySingle={handleRetrySingle}
-                    onOpenSettings={() => setIsSettingsOpen(true)}
-                    isWinner={winnerId === id}
-                  />
-                ))}
-              </div>
-            </div>
           </div>
         </div>
       </main>
 
-      {/* Settings Modal */}
-      <SettingsModal
-        isOpen={isSettingsOpen}
-        onClose={() => setIsSettingsOpen(false)}
-        keys={apiKeys}
-        onSaveKeys={handleSaveKeys}
-      />
-
-      {/* Lightbox / Pixel-Peeping Modal */}
-      <LightboxModal
-        state={lightbox}
-        onClose={() => setLightbox((prev) => ({ ...prev, isOpen: false }))}
-        onDownload={handleDownload}
-        onOpenRegionEditor={handleOpenRegionEditorFromLightbox}
-      />
-
-      {/* Region / Area Inpainting Retouch Modal */}
-      <RegionEditorModal
-        isOpen={regionEditor.isOpen}
-        onClose={() => setRegionEditor((prev) => ({ ...prev, isOpen: false }))}
-        image={regionEditor.image}
-        providerId={regionEditor.providerId}
-        providerName={regionEditor.providerName}
-        apiKeys={apiKeys}
-        onSaveModifiedImage={handleSaveModifiedImage}
+      {/* Login & Account Credentials Modal */}
+      <DualAuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+        authState={authState}
+        onUpdateAuth={handleUpdateAuth}
       />
     </div>
   );

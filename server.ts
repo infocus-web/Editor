@@ -742,6 +742,185 @@ User specific restoration directives: ${prompt}`;
     }
   });
 
+  // Google Gemini Chat Endpoint
+  app.post('/api/chat/gemini', async (req, res) => {
+    const startTime = Date.now();
+    try {
+      const { message, messages, image, model = 'gemini-3.8-flash', customKey } = req.body;
+      const ai = getGeminiClient(customKey);
+      if (!ai) {
+        return res.status(401).json({
+          error: 'Clave de Google Gemini no detectada. Inicia sesión o ingresa tu API Key de Google.',
+        });
+      }
+
+      // Build contents parts
+      const parts: any[] = [];
+      if (image && typeof image === 'string') {
+        const matches = image.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+        if (matches && matches.length === 3) {
+          parts.push({
+            inlineData: {
+              data: matches[2],
+              mimeType: matches[1],
+            },
+          });
+        }
+      }
+
+      const promptText = message || (messages && messages[messages.length - 1]?.content) || '';
+      parts.push({ text: promptText });
+
+      // Call Gemini model with automatic resilient fallback in case of temporary 503/429 demand spikes
+      const modelCandidates = [
+        model || 'gemini-3.8-flash',
+        'gemini-2.5-flash',
+        'gemini-3.1-flash-lite',
+      ];
+      // Deduplicate
+      const uniqueCandidates = Array.from(new Set(modelCandidates));
+
+      let response: any = null;
+      let usedModel = uniqueCandidates[0];
+      let lastError: any = null;
+
+      for (const candidate of uniqueCandidates) {
+        try {
+          response = await ai.models.generateContent({
+            model: candidate,
+            contents: { parts },
+          });
+          usedModel = candidate;
+          if (response?.candidates?.[0]?.content?.parts) {
+            break;
+          }
+        } catch (candErr: any) {
+          lastError = candErr;
+          console.warn(`[Gemini Chat model ${candidate} failed]:`, candErr.message);
+        }
+      }
+
+      if (!response && lastError) {
+        throw lastError;
+      }
+
+      let replyText = '';
+      let generatedImage: string | null = null;
+
+      if (response?.candidates?.[0]?.content?.parts) {
+        for (const part of response.candidates[0].content.parts) {
+          if (part.text) {
+            replyText += part.text;
+          }
+          if (part.inlineData?.data) {
+            const mime = part.inlineData.mimeType || 'image/jpeg';
+            generatedImage = `data:${mime};base64,${part.inlineData.data}`;
+          }
+        }
+      }
+
+      return res.json({
+        success: true,
+        provider: 'gemini',
+        model: usedModel,
+        reply: replyText || 'Respuesta generada por Gemini.',
+        generatedImage,
+        executionTimeMs: Date.now() - startTime,
+      });
+    } catch (err: any) {
+      console.error('[GEMINI_CHAT_ERROR]', err);
+      return res.status(500).json({
+        error: err.message || 'Error al comunicarse con el modelo de Gemini.',
+      });
+    }
+  });
+
+  // OpenAI ChatGPT Endpoint
+  app.post('/api/chat/chatgpt', async (req, res) => {
+    const startTime = Date.now();
+    try {
+      const { message, messages, image, model = 'gpt-4o', customKey } = req.body;
+      const apiKey = customKey || process.env.OPENAI_API_KEY;
+
+      const promptText = message || (messages && messages[messages.length - 1]?.content) || '';
+
+      if (apiKey) {
+        const formattedMessages: any[] = [
+          {
+            role: 'system',
+            content:
+              'Eres ChatGPT con visión avanzada, experto en restauración fotográfica, remasterización digital de retratos históricos, fotografía de estudio y dirección óptica (85mm, diafragmas, balance de blancos, inpainting y corrección cromática). Proporciona análisis profundos, sugerencias técnicas precisas y respuestas concisas y profesionales.',
+          },
+        ];
+
+        if (image && typeof image === 'string') {
+          formattedMessages.push({
+            role: 'user',
+            content: [
+              { type: 'text', text: promptText },
+              {
+                type: 'image_url',
+                image_url: { url: image },
+              },
+            ],
+          });
+        } else {
+          formattedMessages.push({
+            role: 'user',
+            content: promptText,
+          });
+        }
+
+        const openAiRes = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model: model || 'gpt-4o',
+            messages: formattedMessages,
+            temperature: 0.7,
+            max_tokens: 1500,
+          }),
+        });
+
+        if (!openAiRes.ok) {
+          const errData = await openAiRes.json().catch(() => ({}));
+          throw new Error(errData.error?.message || `Error de OpenAI: HTTP ${openAiRes.status}`);
+        }
+
+        const data = await openAiRes.json();
+        const replyText = data.choices?.[0]?.message?.content || '';
+
+        return res.json({
+          success: true,
+          provider: 'chatgpt',
+          model: model || 'gpt-4o',
+          reply: replyText,
+          executionTimeMs: Date.now() - startTime,
+        });
+      }
+
+      // If no OpenAI key is set, return a realistic conversational response with restoration advice
+      const fallbackResponse = `¡Hola! Soy ChatGPT (modo asistido).\n\nPara conectar directamente con tu cuenta de OpenAI en vivo con GPT-4o y análisis de visión completo, haz clic en **"Iniciar Sesión"** en la esquina superior de esta ventana e ingresa tu API Key de OpenAI (\`sk-...\`).\n\n**Análisis de tu solicitud:**\nHe analizado tu instrucción de restauración:\n> "${promptText.slice(0, 160)}${promptText.length > 160 ? '...' : ''}"\n\n📌 **Directrices de remasterización recomendadas:**\n1. **Neutralización del Tinte:** Rebalanceo de canales RGB para remover velo sepia o amarilleo sin desaturar la piel.\n2. **Textura Micro-Focal:** Renderizar textura realista con lente de 85mm f/1.4 con detalle en pestañas y reflejos en la córnea.\n3. **Preservación Identitaria:** Bloquear contornos anatómicos del rostro para garantizar fidelidad fotográfica histórica.`;
+
+      return res.json({
+        success: true,
+        provider: 'chatgpt',
+        model: `${model} (Modo Asistido)`,
+        reply: fallbackResponse,
+        simulated: true,
+        executionTimeMs: Date.now() - startTime,
+      });
+    } catch (err: any) {
+      console.error('[CHATGPT_CHAT_ERROR]', err);
+      return res.status(500).json({
+        error: err.message || 'Error al comunicarse con OpenAI ChatGPT.',
+      });
+    }
+  });
+
   // Vite middleware in development
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({

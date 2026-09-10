@@ -1,6 +1,6 @@
 {
   "name": "Multi-AI Photo Restorer & Comparator",
-  "description": "Upload a portrait and concurrently restore with Google Imagen 3/Gemini, OpenAI DALL-E, and Replicate/Fal AI in parallel to compare and download results.",
+  "description": "Dual AI chat workspace connecting Google Gemini and OpenAI ChatGPT side-by-side with synchronized prompt dispatch, image restoration, and account authentication.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
