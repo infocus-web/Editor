@@ -1,7 +1,6 @@
 import express from 'express';
 import path from 'path';
 import dotenv from 'dotenv';
-import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 
 dotenv.config();
@@ -12,7 +11,6 @@ interface ProviderRequest {
   providerId: 'google' | 'openai' | 'stability' | 'replicate' | 'fal';
   image: string; // base64 data url
   prompt: string;
-  customKey?: string;
 }
 
 interface ProviderResult {
@@ -26,7 +24,8 @@ interface ProviderResult {
   notes?: string;
 }
 
-async function startServer() {
+export async function createApp(options: { serveFrontend?: boolean } = {}) {
+  const { serveFrontend = true } = options;
   const app = express();
 
   // Allow larger payload for high-resolution base64 images
@@ -34,8 +33,8 @@ async function startServer() {
   app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
   // Helper to get GoogleGenAI client
-  function getGeminiClient(customKey?: string): GoogleGenAI | null {
-    const key = customKey || process.env.GEMINI_API_KEY;
+  function getGeminiClient(): GoogleGenAI | null {
+    const key = process.env.GEMINI_API_KEY;
     if (!key) return null;
     return new GoogleGenAI({
       apiKey: key,
@@ -76,25 +75,22 @@ async function startServer() {
   });
 
   // Execute Google Imagen 3 Generative Restoration
-  async function executeGoogle(image: string, prompt: string, customKey?: string): Promise<ProviderResult> {
+  async function executeGoogle(image: string, prompt: string): Promise<ProviderResult> {
     const startTime = Date.now();
-    const providerName = 'Google Imagen 3';
-    const modelName = 'imagen-3.0-generate-002';
-    const activeKey = customKey || process.env.GEMINI_API_KEY;
-
-    if (!activeKey) {
+    const providerName = 'Google Gemini Image';
+    const modelName = 'gemini-3.1-flash-image';
+    if (!process.env.GEMINI_API_KEY) {
       return {
         providerId: 'google',
         providerName,
         modelName,
-        status: 'simulated',
-        imageUrl: image,
+        status: 'error',
         executionTimeMs: Date.now() - startTime,
-        notes: 'Clave de Google Gemini / Imagen no detectada. Configure su API key en Ajustes para enviar la llamada al modelo.',
+        error: 'Gemini no está configurado en el servidor.',
       };
     }
 
-    const ai = getGeminiClient(customKey);
+    const ai = getGeminiClient();
 
     // Master photographic prompt with high creative strength, eliminating vintage color cast and generating real photographic textures
     const fullPhotographicPrompt = `High-end master photorealistic studio portrait restoration. Completely regenerate and rebuild this portrait from scratch with high creative strength.
@@ -106,73 +102,7 @@ CRITICAL REQUIREMENTS:
 User specific restoration directives: ${prompt}`;
 
     try {
-      // 1. Attempt official Imagen 3 generation endpoint via generateImages if available
-      if (ai) {
-        try {
-          const imgRes = await (ai.models as any).generateImages({
-            model: 'imagen-3.0-generate-002',
-            prompt: fullPhotographicPrompt,
-            config: {
-              numberOfImages: 1,
-              outputMimeType: 'image/jpeg',
-              aspectRatio: '1:1',
-            },
-          });
-          if (imgRes.generatedImages?.[0]?.image?.imageBytes) {
-            const b64 = imgRes.generatedImages[0].image.imageBytes;
-            return {
-              providerId: 'google',
-              providerName,
-              modelName: 'imagen-3.0-generate-002',
-              status: 'success',
-              imageUrl: `data:image/jpeg;base64,${b64}`,
-              executionTimeMs: Date.now() - startTime,
-              notes: 'Generado exitosamente con Google Imagen 3 (imagen-3.0-generate-002). Reconstrucción fotorrealista completa desde cero.',
-            };
-          }
-        } catch (genImgErr: any) {
-          console.log('[Imagen 3 generateImages attempt]:', genImgErr.message);
-        }
-      }
-
-      // 2. Attempt official Imagen 3 REST predict endpoints (imagen-3.0-generate-002 / imagen-3.0-capability-001)
-      const imagenModels = ['imagen-3.0-generate-002', 'imagen-3.0-capability-001'];
-      for (const candidateModel of imagenModels) {
-        try {
-          const restUrl = `https://generativelanguage.googleapis.com/v1beta/models/${candidateModel}:predict?key=${activeKey}`;
-          const restRes = await fetch(restUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              instances: [{ prompt: fullPhotographicPrompt }],
-              parameters: {
-                sampleCount: 1,
-                aspectRatio: '1:1',
-                outputOptions: { mimeType: 'image/jpeg' },
-              },
-            }),
-          });
-          if (restRes.ok) {
-            const restData = await restRes.json();
-            const b64 = restData.predictions?.[0]?.bytesBase64Encoded;
-            if (b64) {
-              return {
-                providerId: 'google',
-                providerName,
-                modelName: candidateModel,
-                status: 'success',
-                imageUrl: `data:image/jpeg;base64,${b64}`,
-                executionTimeMs: Date.now() - startTime,
-                notes: `Generado exitosamente con Google Imagen 3 (${candidateModel}). Reconstrucción fotorrealista desde cero.`,
-              };
-            }
-          }
-        } catch (restErr: any) {
-          console.log(`[Imagen REST ${candidateModel} attempt]:`, restErr.message);
-        }
-      }
-
-      // 3. Multimodal image generation with strict identity reference using Gemini Vision & Image Synthesis
+      // Multimodal image editing with current Gemini image models.
       if (ai) {
         const parsed = parseBase64Image(image);
         const mimeType = parsed?.mimeType || 'image/jpeg';
@@ -235,7 +165,7 @@ User specific restoration directives: ${prompt}`;
       }
 
       throw new Error(
-        'No se pudo sintetizar la nueva imagen con los modelos de Google Imagen 3. Verifique que su clave API de Google AI Studio cuente con cuota habilitada para generación de imágenes.'
+        'No se pudo editar la imagen con Gemini. Verificá la cuota y el acceso de la API key a modelos de imagen.'
       );
     } catch (err: any) {
       console.error('[Google Error]:', err.message);
@@ -245,46 +175,53 @@ User specific restoration directives: ${prompt}`;
         modelName,
         status: 'error',
         executionTimeMs: Date.now() - startTime,
-        error: err.message || 'Error al conectar con el servicio de Google Imagen 3.',
+        error: err.message || 'Error al conectar con Google Gemini Image.',
       };
     }
   }
 
-  // Execute OpenAI DALL-E 3 / Image Edit
-  async function executeOpenAI(image: string, prompt: string, customKey?: string): Promise<ProviderResult> {
+  // Execute OpenAI image restoration using the current image editing endpoint.
+  async function executeOpenAI(image: string, prompt: string): Promise<ProviderResult> {
     const startTime = Date.now();
-    const providerName = 'OpenAI DALL-E 3';
-    const modelName = 'dall-e-3 / gpt-image';
-    const apiKey = customKey || process.env.OPENAI_API_KEY;
+    const providerName = 'OpenAI GPT Image';
+    const modelName = 'gpt-image-2';
+    const apiKey = process.env.OPENAI_API_KEY;
 
     if (!apiKey) {
       return {
         providerId: 'openai',
         providerName,
         modelName,
-        status: 'simulated',
-        imageUrl: image,
+        status: 'error',
         executionTimeMs: Date.now() - startTime,
-        notes: 'Clave de OpenAI no configurada. Ingrese su clave (sk-...) en Ajustes para enviar a DALL-E 3.',
+        error: 'OpenAI no está configurado en el servidor.',
       };
     }
 
     try {
-      // Call OpenAI API
-      const response = await fetch('https://api.openai.com/v1/images/generations', {
+      const parsed = parseBase64Image(image);
+      if (!parsed) throw new Error('La imagen recibida no tiene un formato válido.');
+
+      const extension = parsed.mimeType.includes('png') ? 'png' : 'jpg';
+      const formData = new FormData();
+      formData.append(
+        'image',
+        new Blob([Buffer.from(parsed.base64, 'base64')], { type: parsed.mimeType }),
+        `portrait.${extension}`
+      );
+      formData.append('model', modelName);
+      formData.append(
+        'prompt',
+        `Restore and enhance this exact portrait while preserving identity and composition. ${prompt}. Natural skin texture, realistic detail and professional photographic color.`
+      );
+      formData.append('size', '1024x1024');
+
+      const response = await fetch('https://api.openai.com/v1/images/edits', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
           Authorization: `Bearer ${apiKey}`,
         },
-        body: JSON.stringify({
-          model: 'dall-e-3',
-          prompt: `Master photo restoration and enhancement of a portrait: ${prompt}. Authentic skin, high fidelity, 85mm lens portrait look.`,
-          n: 1,
-          size: '1024x1024',
-          quality: 'standard',
-          response_format: 'b64_json',
-        }),
+        body: formData,
       });
 
       const data = await response.json();
@@ -302,7 +239,7 @@ User specific restoration directives: ${prompt}`;
         status: 'success',
         imageUrl: url,
         executionTimeMs: Date.now() - startTime,
-        notes: data?.data?.[0]?.revised_prompt || 'Generado exitosamente con OpenAI DALL-E 3.',
+        notes: 'Imagen editada correctamente con OpenAI GPT Image.',
       };
     } catch (err: any) {
       console.error('[OpenAI Error]:', err.message);
@@ -318,21 +255,20 @@ User specific restoration directives: ${prompt}`;
   }
 
   // Execute Stability AI SD3 / SDXL image-to-image
-  async function executeStability(image: string, prompt: string, customKey?: string): Promise<ProviderResult> {
+  async function executeStability(image: string, prompt: string): Promise<ProviderResult> {
     const startTime = Date.now();
     const providerName = 'Stability AI (SD3 / SDXL)';
     const modelName = 'sd3.5-large-restore';
-    const apiKey = customKey || process.env.STABILITY_API_KEY;
+    const apiKey = process.env.STABILITY_API_KEY;
 
     if (!apiKey) {
       return {
         providerId: 'stability',
         providerName,
         modelName,
-        status: 'simulated',
-        imageUrl: image,
+        status: 'error',
         executionTimeMs: Date.now() - startTime,
-        notes: 'Clave de Stability AI no configurada. Configure su API key en Ajustes para usar SD3.5 / SDXL.',
+        error: 'Stability AI no está configurado en el servidor.',
       };
     }
 
@@ -388,22 +324,21 @@ User specific restoration directives: ${prompt}`;
   }
 
   // Execute Replicate / Fal.ai (Flux.1 / CodeFormer)
-  async function executeReplicateOrFal(image: string, prompt: string, customKey?: string, isFal = false): Promise<ProviderResult> {
+  async function executeReplicateOrFal(image: string, prompt: string, isFal = false): Promise<ProviderResult> {
     const startTime = Date.now();
     const providerId = isFal ? 'fal' : 'replicate';
     const providerName = isFal ? 'Fal.ai (Flux.1 / CodeFormer)' : 'Replicate (Flux / CodeFormer)';
     const modelName = isFal ? 'fal-ai/flux-realism' : 'sczhou/codeformer';
-    const apiKey = customKey || (isFal ? process.env.FAL_KEY : process.env.REPLICATE_API_TOKEN);
+    const apiKey = isFal ? process.env.FAL_KEY : process.env.REPLICATE_API_TOKEN;
 
     if (!apiKey) {
       return {
         providerId,
         providerName,
         modelName,
-        status: 'simulated',
-        imageUrl: image,
+        status: 'error',
         executionTimeMs: Date.now() - startTime,
-        notes: `Clave de ${isFal ? 'Fal.ai' : 'Replicate'} no configurada. Agréguela en Ajustes para restauración con Flux/CodeFormer.`,
+        error: `${isFal ? 'Fal.ai' : 'Replicate'} no está configurado en el servidor.`,
       };
     }
 
@@ -513,7 +448,6 @@ User specific restoration directives: ${prompt}`;
         image,
         prompt,
         providers = ['google', 'openai', 'stability', 'replicate'],
-        keys = {},
       } = req.body;
 
       if (!image) {
@@ -526,19 +460,19 @@ User specific restoration directives: ${prompt}`;
       const tasks: Promise<ProviderResult>[] = [];
 
       if (providers.includes('google')) {
-        tasks.push(executeGoogle(image, prompt, keys.google));
+        tasks.push(executeGoogle(image, prompt));
       }
       if (providers.includes('openai')) {
-        tasks.push(executeOpenAI(image, prompt, keys.openai));
+        tasks.push(executeOpenAI(image, prompt));
       }
       if (providers.includes('stability')) {
-        tasks.push(executeStability(image, prompt, keys.stability));
+        tasks.push(executeStability(image, prompt));
       }
       if (providers.includes('replicate')) {
-        tasks.push(executeReplicateOrFal(image, prompt, keys.replicate, false));
+        tasks.push(executeReplicateOrFal(image, prompt, false));
       }
       if (providers.includes('fal')) {
-        tasks.push(executeReplicateOrFal(image, prompt, keys.fal, true));
+        tasks.push(executeReplicateOrFal(image, prompt, true));
       }
 
       // Execute all concurrently with Promise.allSettled
@@ -575,7 +509,7 @@ User specific restoration directives: ${prompt}`;
   // Single provider execute endpoint (for retrying individual cards)
   app.post('/api/restore-single', async (req, res) => {
     try {
-      const { providerId, image, prompt, customKey } = req.body;
+      const { providerId, image, prompt } = req.body;
       if (!providerId || !image) {
         return res.status(400).json({ error: 'Faltan parámetros requeridos (providerId, image)' });
       }
@@ -583,19 +517,19 @@ User specific restoration directives: ${prompt}`;
       let result: ProviderResult;
       switch (providerId) {
         case 'google':
-          result = await executeGoogle(image, prompt, customKey);
+          result = await executeGoogle(image, prompt);
           break;
         case 'openai':
-          result = await executeOpenAI(image, prompt, customKey);
+          result = await executeOpenAI(image, prompt);
           break;
         case 'stability':
-          result = await executeStability(image, prompt, customKey);
+          result = await executeStability(image, prompt);
           break;
         case 'replicate':
-          result = await executeReplicateOrFal(image, prompt, customKey, false);
+          result = await executeReplicateOrFal(image, prompt, false);
           break;
         case 'fal':
-          result = await executeReplicateOrFal(image, prompt, customKey, true);
+          result = await executeReplicateOrFal(image, prompt, true);
           break;
         default:
           return res.status(400).json({ error: `Proveedor no soportado: ${providerId}` });
@@ -610,7 +544,7 @@ User specific restoration directives: ${prompt}`;
   // Targeted Region Inpainting / Area Modification endpoint
   app.post('/api/edit-region', async (req, res) => {
     try {
-      const { image, mask, regionBox, prompt, providerId = 'google', customKey } = req.body;
+      const { image, mask, regionBox, prompt, providerId = 'google' } = req.body;
       if (!image || !prompt) {
         return res.status(400).json({ error: 'Se requiere una imagen y una instrucción de modificación.' });
       }
@@ -620,7 +554,7 @@ User specific restoration directives: ${prompt}`;
 
       // If provider is google
       if (providerId === 'google') {
-        const ai = getGeminiClient(customKey);
+        const ai = getGeminiClient();
         if (ai) {
           try {
             const parsed = parseBase64Image(image);
@@ -695,8 +629,8 @@ User specific restoration directives: ${prompt}`;
       }
 
       // Stability AI Inpainting
-      if (providerId === 'stability' && (customKey || process.env.STABILITY_API_KEY)) {
-        const apiKey = customKey || process.env.STABILITY_API_KEY;
+      if (providerId === 'stability' && process.env.STABILITY_API_KEY) {
+        const apiKey = process.env.STABILITY_API_KEY;
         try {
           const base64Data = image.replace(/^data:image\/\w+;base64,/, '');
           const imageBuffer = Buffer.from(base64Data, 'base64');
@@ -736,11 +670,8 @@ User specific restoration directives: ${prompt}`;
         }
       }
 
-      // Return simulated fallback indication
-      return res.json({
-        success: true,
-        simulated: true,
-        notes: 'Inpainting procesado y fusionado localmente en el área seleccionada.',
+      return res.status(503).json({
+        error: 'No hay un proveedor de edición configurado o el proveedor no pudo completar la operación.',
         executionTimeMs: Date.now() - startTime,
       });
     } catch (err: any) {
@@ -753,11 +684,11 @@ User specific restoration directives: ${prompt}`;
   app.post('/api/chat/gemini', async (req, res) => {
     const startTime = Date.now();
     try {
-      const { message, messages, image, model = 'gemini-3.8-flash', customKey } = req.body;
-      const ai = getGeminiClient(customKey);
+      const { message, messages, image, model = 'gemini-3.8-flash' } = req.body;
+      const ai = getGeminiClient();
       if (!ai) {
         return res.status(401).json({
-          error: 'Clave de Google Gemini no detectada. Inicia sesión o ingresa tu API Key de Google.',
+          error: 'Gemini no está configurado en el servidor. Agregá GEMINI_API_KEY en las variables de entorno.',
         });
       }
 
@@ -789,9 +720,6 @@ User specific restoration directives: ${prompt}`;
         modelCandidates = ['gemini-3.8-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite'];
       } else if (requested === 'gemini-3.1-pro-preview') {
         modelCandidates = ['gemini-3.1-pro-preview', 'gemini-3.8-flash', 'gemini-3.5-flash-lite'];
-      } else if (requested === 'gemini-3.1-pro-thinking') {
-        modelCandidates = ['gemini-3.1-pro-preview', 'gemini-3.8-flash'];
-        thinkingConfig = { thinkingBudget: 2048 };
       } else {
         modelCandidates = [requested, 'gemini-3.5-flash-lite', 'gemini-3.8-flash'];
       }
@@ -873,8 +801,8 @@ User specific restoration directives: ${prompt}`;
   app.post('/api/chat/chatgpt', async (req, res) => {
     const startTime = Date.now();
     try {
-      const { message, messages, image, model = 'gpt-5.6-sol', customKey } = req.body;
-      const apiKey = customKey || process.env.OPENAI_API_KEY;
+      const { message, messages, image, model = 'gpt-5.6-sol' } = req.body;
+      const apiKey = process.env.OPENAI_API_KEY;
 
       const modelDisplayName =
         model === 'gpt-5.6-sol'
@@ -885,64 +813,32 @@ User specific restoration directives: ${prompt}`;
 
       const promptText = message || (messages && messages[messages.length - 1]?.content) || '';
 
-      if (apiKey) {
-        const formattedMessages: any[] = [
-          {
-            role: 'system',
-            content:
-              'Eres ChatGPT (GPT-5.6 Sol / GPT-5.5) con visión avanzada y alto esfuerzo de razonamiento, experto en restauración fotográfica, remasterización digital de retratos históricos, fotografía de estudio y dirección óptica (85mm, diafragmas, balance de blancos, inpainting y corrección cromática). Proporciona análisis profundos, sugerencias técnicas precisas y respuestas concisas y profesionales.',
-          },
-        ];
-
-        if (image && typeof image === 'string') {
-          formattedMessages.push({
-            role: 'user',
-            content: [
-              { type: 'text', text: promptText },
-              {
-                type: 'image_url',
-                image_url: { url: image },
-              },
-            ],
-          });
-        } else {
-          formattedMessages.push({
-            role: 'user',
-            content: promptText,
-          });
-        }
-
-        // Try requested model, with fallback to gpt-4o if not yet enabled on standard account key
-        let openAiRes = await fetch('https://api.openai.com/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${apiKey}`,
-          },
-          body: JSON.stringify({
-            model: model || 'gpt-4o',
-            messages: formattedMessages,
-            temperature: 0.7,
-            max_tokens: 1500,
-          }),
+      if (!apiKey) {
+        return res.status(503).json({
+          error: 'OpenAI no está configurado en el servidor. Agregá OPENAI_API_KEY en las variables de entorno.',
         });
+      }
 
-        // Fallback if model name is restricted to preview tiers
-        if (!openAiRes.ok && (model === 'gpt-5.6-sol' || model === 'gpt-5.5')) {
-          openAiRes = await fetch('https://api.openai.com/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${apiKey}`,
-            },
-            body: JSON.stringify({
-              model: 'gpt-4o',
-              messages: formattedMessages,
-              temperature: 0.7,
-              max_tokens: 1500,
-            }),
-          });
-        }
+      const content: any[] = [{ type: 'input_text', text: promptText }];
+      if (image && typeof image === 'string') {
+        content.push({ type: 'input_image', image_url: image });
+      }
+
+      const openAiRes = await fetch('https://api.openai.com/v1/responses', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model,
+          instructions:
+            'Sos un especialista en restauración fotográfica, remasterización digital de retratos históricos y fotografía de estudio. Respondé en español claro, con sugerencias técnicas precisas y concisas.',
+          input: [{ role: 'user', content }],
+          max_output_tokens: 1500,
+          store: false,
+        }),
+      });
 
         if (!openAiRes.ok) {
           const errData = await openAiRes.json().catch(() => ({}));
@@ -950,7 +846,14 @@ User specific restoration directives: ${prompt}`;
         }
 
         const data = await openAiRes.json();
-        const replyText = data.choices?.[0]?.message?.content || '';
+        const replyText =
+          data.output_text ||
+          data.output
+            ?.flatMap((item: any) => item.content || [])
+            .filter((item: any) => item.type === 'output_text')
+            .map((item: any) => item.text)
+            .join('\n') ||
+          '';
 
         return res.json({
           success: true,
@@ -959,19 +862,6 @@ User specific restoration directives: ${prompt}`;
           reply: replyText,
           executionTimeMs: Date.now() - startTime,
         });
-      }
-
-      // If no OpenAI key is set, return a realistic conversational response with restoration advice
-      const fallbackResponse = `¡Hola! Soy ChatGPT (${modelDisplayName} con esfuerzo de razonamiento asistido).\n\nPara conectar directamente con tu cuenta de OpenAI en vivo con ${modelDisplayName} y análisis de visión completo, haz clic en **"Iniciar Sesión"** en la esquina superior de esta ventana e ingresa tu API Key de OpenAI (\`sk-...\`).\n\n**Análisis de tu solicitud con ${modelDisplayName}:**\nHe analizado tu instrucción de restauración:\n> "${promptText.slice(0, 160)}${promptText.length > 160 ? '...' : ''}"\n\n📌 **Directrices de remasterización recomendadas:**\n1. **Neutralización del Tinte:** Rebalanceo de canales RGB para remover velo sepia o amarilleo sin desaturar la piel.\n2. **Textura Micro-Focal:** Renderizar textura realista con lente de 85mm f/1.4 con detalle en pestañas y reflejos en la córnea.\n3. **Preservación Identitaria:** Bloquear contornos anatómicos del rostro para garantizar fidelidad fotográfica histórica.`;
-
-      return res.json({
-        success: true,
-        provider: 'chatgpt',
-        model: `${modelDisplayName} (Modo Asistido)`,
-        reply: fallbackResponse,
-        simulated: true,
-        executionTimeMs: Date.now() - startTime,
-      });
     } catch (err: any) {
       console.error('[CHATGPT_CHAT_ERROR]', err);
       return res.status(500).json({
@@ -981,13 +871,14 @@ User specific restoration directives: ${prompt}`;
   });
 
   // Vite middleware in development
-  if (process.env.NODE_ENV !== 'production') {
+  if (serveFrontend && process.env.NODE_ENV !== 'production') {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
     });
     app.use(vite.middlewares);
-  } else {
+  } else if (serveFrontend) {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
     app.get('*', (req, res) => {
@@ -995,9 +886,16 @@ User specific restoration directives: ${prompt}`;
     });
   }
 
+  return app;
+}
+
+async function startServer() {
+  const app = await createApp();
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Multi-AI Photo Restorer Server running on http://0.0.0.0:${PORT}`);
   });
 }
 
-startServer();
+if (!process.env.VERCEL) {
+  startServer();
+}

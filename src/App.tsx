@@ -1,14 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import {
   Sparkles,
-  Zap,
-  Key,
   ShieldCheck,
-  RotateCcw,
-  Sliders,
   Send,
-  LogIn,
-  Check,
 } from 'lucide-react';
 import {
   SamplePortrait,
@@ -45,16 +39,14 @@ async function parseSafeJsonResponse(res: Response, serviceName: string) {
 
 const DEFAULT_AUTH: DualAuthState = {
   gemini: {
-    email: 'alderpol@gmail.com',
-    name: 'Usuario Google',
-    isLoggedIn: true,
-    avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80',
+    email: '',
+    name: 'Google Gemini',
+    isLoggedIn: false,
   },
   chatgpt: {
-    email: 'alderpol@openai.com',
-    name: 'Usuario ChatGPT',
+    email: '',
+    name: 'OpenAI',
     isLoggedIn: false,
-    avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&auto=format&fit=crop&q=80',
   },
 };
 
@@ -94,25 +86,28 @@ export default function App() {
   const [geminiModel, setGeminiModel] = useState('gemini-3.8-flash');
   const [chatgptModel, setChatgptModel] = useState('gpt-5.6-sol');
 
-  // Auth State
-  const [authState, setAuthState] = useState<DualAuthState>(() => {
-    try {
-      const stored = localStorage.getItem('dual_chat_auth');
-      return stored ? JSON.parse(stored) : DEFAULT_AUTH;
-    } catch {
-      return DEFAULT_AUTH;
-    }
-  });
+  // Provider availability comes from server-side environment variables.
+  const [authState, setAuthState] = useState<DualAuthState>(DEFAULT_AUTH);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
 
-  const handleUpdateAuth = (newAuth: DualAuthState) => {
-    setAuthState(newAuth);
-    try {
-      localStorage.setItem('dual_chat_auth', JSON.stringify(newAuth));
-    } catch (e) {
-      console.error('Error saving auth to localStorage', e);
-    }
-  };
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/health')
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
+      .then((health) => {
+        if (cancelled) return;
+        setAuthState({
+          gemini: { ...DEFAULT_AUTH.gemini, isLoggedIn: Boolean(health.hasGoogleKey) },
+          chatgpt: { ...DEFAULT_AUTH.chatgpt, isLoggedIn: Boolean(health.hasOpenAiKey) },
+        });
+      })
+      .catch(() => {
+        if (!cancelled) setAuthState(DEFAULT_AUTH);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Dispatch message to Gemini
   const sendToGemini = async (promptText: string, imageToUse: string | null) => {
@@ -145,7 +140,6 @@ export default function App() {
           message: promptText,
           image: finalImage,
           model: geminiModel,
-          customKey: authState.gemini.apiKey || undefined,
         }),
       });
 
@@ -206,7 +200,6 @@ export default function App() {
           message: promptText,
           image: finalImage,
           model: chatgptModel,
-          customKey: authState.chatgpt.apiKey || undefined,
         }),
       });
 
@@ -318,20 +311,20 @@ export default function App() {
             <div
               onClick={() => setIsAuthModalOpen(true)}
               className="hidden md:flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-blue-950/40 border border-blue-800/50 text-[11px] text-blue-300 cursor-pointer hover:bg-blue-900/40 transition-colors"
-              title="Cuenta Google Gemini"
+              title="Estado de Gemini en el servidor"
             >
-              <span className="w-1.5 h-1.5 rounded-full bg-blue-400"></span>
-              <span>Gemini: {authState.gemini.isLoggedIn ? 'Conectado' : 'Sin sesión'}</span>
+              <span className={`w-1.5 h-1.5 rounded-full ${authState.gemini.isLoggedIn ? 'bg-emerald-400' : 'bg-amber-400'}`}></span>
+              <span>Gemini: {authState.gemini.isLoggedIn ? 'Configurado' : 'Sin API key'}</span>
             </div>
 
             {/* Quick ChatGPT status */}
             <div
               onClick={() => setIsAuthModalOpen(true)}
               className="hidden md:flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-emerald-950/40 border border-emerald-800/50 text-[11px] text-emerald-300 cursor-pointer hover:bg-emerald-900/40 transition-colors"
-              title="Cuenta OpenAI ChatGPT"
+              title="Estado de OpenAI en el servidor"
             >
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-              <span>ChatGPT: {authState.chatgpt.isLoggedIn ? 'Conectado' : 'Sin sesión'}</span>
+              <span className={`w-1.5 h-1.5 rounded-full ${authState.chatgpt.isLoggedIn ? 'bg-emerald-400' : 'bg-amber-400'}`}></span>
+              <span>ChatGPT: {authState.chatgpt.isLoggedIn ? 'Configurado' : 'Sin API key'}</span>
             </div>
 
             {/* Main Auth Button */}
@@ -341,7 +334,7 @@ export default function App() {
               className="px-3 py-1.5 rounded-xl bg-neutral-900 hover:bg-neutral-800 text-xs font-medium text-neutral-200 border border-neutral-700/80 flex items-center space-x-2 transition-all hover:border-neutral-600 shadow-sm"
             >
               <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
-              <span>Login & Cuentas</span>
+              <span>Estado de conexión</span>
             </button>
           </div>
         </div>
@@ -441,12 +434,11 @@ export default function App() {
         </div>
       </main>
 
-      {/* Login & Account Credentials Modal */}
+      {/* Server-side provider status */}
       <DualAuthModal
         isOpen={isAuthModalOpen}
         onClose={() => setIsAuthModalOpen(false)}
         authState={authState}
-        onUpdateAuth={handleUpdateAuth}
       />
     </div>
   );

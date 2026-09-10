@@ -27,17 +27,17 @@ export const ProviderSelector: React.FC<ProviderSelectorProps> = ({
   const providerOptions: ProviderOption[] = [
     {
       id: 'google',
-      name: 'Google Imagen 3',
+      name: 'Google Gemini Image',
       badge: 'Google AI Studio',
-      model: 'imagen-3.0-generate-002',
+      model: 'gemini-3.1-flash-image',
       description: 'Generación fotorrealista desde cero con preservación estricta de identidad.',
       hasKey: Boolean(keys.google),
     },
     {
       id: 'openai',
-      name: 'OpenAI DALL-E 3',
+      name: 'OpenAI GPT Image',
       badge: 'OpenAI API',
-      model: 'dall-e-3 / gpt-image',
+      model: 'gpt-image-2',
       description: 'Reconstrucción vívida de retratos con nitidez de estudio.',
       hasKey: Boolean(keys.openai),
     },
@@ -127,14 +127,14 @@ export const ProviderSelector: React.FC<ProviderSelectorProps> = ({
                   className={`flex items-center space-x-1 ${
                     prov.hasKey ? 'text-emerald-400' : 'text-neutral-500'
                   }`}
-                  title={prov.hasKey ? 'API Key configurada' : 'Modo simulación (sin key)'}
+                  title={prov.hasKey ? 'API key configurada' : 'Proveedor no configurado'}
                 >
                   <span
                     className={`w-1.5 h-1.5 rounded-full ${
                       prov.hasKey ? 'bg-emerald-400' : 'bg-neutral-600'
                     }`}
                   ></span>
-                  <span>{prov.hasKey ? 'Key Activa' : 'Simulación'}</span>
+                  <span>{prov.hasKey ? 'Configurado' : 'No configurado'}</span>
                 </span>
               </div>
             </div>

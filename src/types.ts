@@ -83,7 +83,6 @@ export interface AuthAccount {
   name: string;
   avatar?: string;
   isLoggedIn: boolean;
-  apiKey?: string;
 }
 
 export interface DualAuthState {

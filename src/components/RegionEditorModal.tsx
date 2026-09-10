@@ -306,7 +306,6 @@ export const RegionEditorModal: React.FC<RegionEditorModalProps> = ({
           regionBox: normalizedBox,
           prompt,
           providerId: selectedProvider,
-          customKey: apiKeys[selectedProvider as keyof UserApiKeys],
         }),
       });
 

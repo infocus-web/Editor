@@ -28,11 +28,6 @@ export interface GeminiOfficialModel {
 
 export const GEMINI_OFFICIAL_MODELS: GeminiOfficialModel[] = [
   {
-    id: 'gemini-3.5-flash-lite',
-    name: '3.5 Flash-Lite',
-    subtitle: 'Respuestas rápidas',
-  },
-  {
     id: 'gemini-3.8-flash',
     name: '3.8 Flash',
     subtitle: 'Ayuda completa',
@@ -44,10 +39,9 @@ export const GEMINI_OFFICIAL_MODELS: GeminiOfficialModel[] = [
     subtitle: 'Razonamiento avanzado',
   },
   {
-    id: 'gemini-3.1-pro-thinking',
-    name: 'Razonamiento ampliado',
-    subtitle: 'Resolución de problemas complejos...',
-    isExtended: true,
+    id: 'gemini-3.5-flash-lite',
+    name: '3.5 Flash-Lite',
+    subtitle: 'Respuestas rápidas y económicas',
   },
 ];
 
@@ -208,7 +202,7 @@ export const DualChatView: React.FC<DualChatViewProps> = ({
             className="px-3 py-1 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-neutral-200 border border-neutral-700 flex items-center space-x-1.5 text-[11px] font-medium transition-colors"
           >
             <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
-            <span>Gestionar Cuentas / Login</span>
+            <span>Estado de conexión</span>
           </button>
         </div>
       </div>
@@ -226,7 +220,7 @@ export const DualChatView: React.FC<DualChatViewProps> = ({
               <div className="relative" ref={geminiMenuRef}>
                 <div className="flex items-center space-x-2">
                   <h3 className="text-xs font-bold text-neutral-100">Google Gemini</h3>
-                  <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+                  <span className={`w-2 h-2 rounded-full ${authState.gemini.isLoggedIn ? 'bg-emerald-400' : 'bg-amber-400'}`}></span>
                 </div>
 
                 <button
@@ -297,7 +291,7 @@ export const DualChatView: React.FC<DualChatViewProps> = ({
               </div>
             </div>
 
-            {/* Gemini Login badge */}
+            {/* Gemini server configuration badge */}
             <button
               type="button"
               onClick={() => onOpenAuthModal('gemini')}
@@ -307,9 +301,9 @@ export const DualChatView: React.FC<DualChatViewProps> = ({
                   : 'border-neutral-700 bg-neutral-800 text-neutral-400 hover:text-neutral-200'
               }`}
             >
-              <span className="w-1.5 h-1.5 rounded-full bg-blue-400"></span>
+              <span className={`w-1.5 h-1.5 rounded-full ${authState.gemini.isLoggedIn ? 'bg-emerald-400' : 'bg-amber-400'}`}></span>
               <span className="max-w-[110px] truncate">
-                {authState.gemini.isLoggedIn ? authState.gemini.name : 'Iniciar Sesión'}
+                {authState.gemini.isLoggedIn ? 'Configurado' : 'Sin API key'}
               </span>
             </button>
           </div>
@@ -450,7 +444,7 @@ export const DualChatView: React.FC<DualChatViewProps> = ({
               <div className="relative" ref={chatgptMenuRef}>
                 <div className="flex items-center space-x-2">
                   <h3 className="text-xs font-bold text-neutral-100">OpenAI ChatGPT</h3>
-                  <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+                  <span className={`w-2 h-2 rounded-full ${authState.chatgpt.isLoggedIn ? 'bg-emerald-400' : 'bg-amber-400'}`}></span>
                 </div>
 
                 <button
@@ -521,7 +515,7 @@ export const DualChatView: React.FC<DualChatViewProps> = ({
               </div>
             </div>
 
-            {/* ChatGPT Login badge */}
+            {/* OpenAI server configuration badge */}
             <button
               type="button"
               onClick={() => onOpenAuthModal('chatgpt')}
@@ -531,9 +525,9 @@ export const DualChatView: React.FC<DualChatViewProps> = ({
                   : 'border-neutral-700 bg-neutral-800 text-neutral-400 hover:text-neutral-200'
               }`}
             >
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+              <span className={`w-1.5 h-1.5 rounded-full ${authState.chatgpt.isLoggedIn ? 'bg-emerald-400' : 'bg-amber-400'}`}></span>
               <span className="max-w-[110px] truncate">
-                {authState.chatgpt.isLoggedIn ? authState.chatgpt.name : 'Iniciar Sesión'}
+                {authState.chatgpt.isLoggedIn ? 'Configurado' : 'Sin API key'}
               </span>
             </button>
           </div>
