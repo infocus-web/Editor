@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { SAMPLE_PORTRAITS } from '../utils/samples';
 import { SamplePortrait } from '../types';
+import { optimizeImageForAi } from '../utils/imageOptimizer';
 
 interface UploadZoneProps {
   originalImage: string | null;
@@ -33,23 +34,32 @@ export const UploadZone: React.FC<UploadZoneProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [justPastedId, setJustPastedId] = useState<string | null>(null);
 
-  const handleFile = (file: File) => {
+  const handleFile = async (file: File) => {
     if (!file.type.startsWith('image/')) {
       alert('Por favor sube un archivo de imagen (JPG, PNG o WEBP).');
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      if (typeof e.target?.result === 'string') {
-        const sizeMb = (file.size / (1024 * 1024)).toFixed(2);
-        onImageSelected(e.target.result, {
-          name: file.name,
-          size: `${sizeMb} MB`,
-        });
-      }
-    };
-    reader.readAsDataURL(file);
+    try {
+      const optimized = await optimizeImageForAi(file);
+      onImageSelected(optimized.dataUrl, {
+        name: file.name,
+        size: `${optimized.optimizedSizeMb} (Optimizado)`,
+      });
+    } catch (err) {
+      // Fallback to basic file reader
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        if (typeof e.target?.result === 'string') {
+          const sizeMb = (file.size / (1024 * 1024)).toFixed(2);
+          onImageSelected(e.target.result, {
+            name: file.name,
+            size: `${sizeMb} MB`,
+          });
+        }
+      };
+      reader.readAsDataURL(file);
+    }
   };
 
   const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {

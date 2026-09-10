@@ -13,8 +13,72 @@ import {
   RefreshCw,
   Sliders,
   Zap,
+  ChevronDown,
+  BrainCircuit,
 } from 'lucide-react';
 import { ChatMessage, DualAuthState } from '../types';
+
+export interface GeminiOfficialModel {
+  id: string;
+  name: string;
+  subtitle: string;
+  badge?: string;
+  isExtended?: boolean;
+}
+
+export const GEMINI_OFFICIAL_MODELS: GeminiOfficialModel[] = [
+  {
+    id: 'gemini-3.5-flash-lite',
+    name: '3.5 Flash-Lite',
+    subtitle: 'Respuestas rápidas',
+  },
+  {
+    id: 'gemini-3.8-flash',
+    name: '3.8 Flash',
+    subtitle: 'Ayuda completa',
+    badge: 'Nuevo',
+  },
+  {
+    id: 'gemini-3.1-pro-preview',
+    name: '3.1 Pro',
+    subtitle: 'Razonamiento avanzado',
+  },
+  {
+    id: 'gemini-3.1-pro-thinking',
+    name: 'Razonamiento ampliado',
+    subtitle: 'Resolución de problemas complejos...',
+    isExtended: true,
+  },
+];
+
+export interface ChatgptOfficialModel {
+  id: string;
+  name: string;
+  subtitle?: string;
+  reasoningLabel?: string;
+  badge?: string;
+}
+
+export const CHATGPT_OFFICIAL_MODELS: ChatgptOfficialModel[] = [
+  {
+    id: 'gpt-5.6-sol',
+    name: 'GPT-5.6 Sol',
+    subtitle: 'Modelo insignia con esfuerzo de razonamiento profundo',
+    reasoningLabel: 'Esfuerzo de razonamie',
+  },
+  {
+    id: 'gpt-5.5',
+    name: 'GPT-5.5',
+    subtitle: 'Razonamiento ágil y multimodalidad avanzada',
+    reasoningLabel: 'Razonamiento estándar',
+  },
+  {
+    id: 'gpt-4o',
+    name: 'GPT-4o',
+    subtitle: 'Omni visión clásico',
+    reasoningLabel: 'Modo general',
+  },
+];
 
 interface DualChatViewProps {
   geminiMessages: ChatMessage[];
@@ -59,7 +123,29 @@ export const DualChatView: React.FC<DualChatViewProps> = ({
 }) => {
   const geminiScrollRef = useRef<HTMLDivElement>(null);
   const chatgptScrollRef = useRef<HTMLDivElement>(null);
+  const geminiMenuRef = useRef<HTMLDivElement>(null);
+  const chatgptMenuRef = useRef<HTMLDivElement>(null);
+  const [isGeminiMenuOpen, setIsGeminiMenuOpen] = useState(false);
+  const [isChatgptMenuOpen, setIsChatgptMenuOpen] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  // Close menus on outside click
+  useEffect(() => {
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (geminiMenuRef.current && !geminiMenuRef.current.contains(e.target as Node)) {
+        setIsGeminiMenuOpen(false);
+      }
+      if (chatgptMenuRef.current && !chatgptMenuRef.current.contains(e.target as Node)) {
+        setIsChatgptMenuOpen(false);
+      }
+    };
+    if (isGeminiMenuOpen || isChatgptMenuOpen) {
+      document.addEventListener('mousedown', handleOutsideClick);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideClick);
+    };
+  }, [isGeminiMenuOpen, isChatgptMenuOpen]);
 
   // Auto-scroll on new messages
   useEffect(() => {
@@ -91,18 +177,6 @@ export const DualChatView: React.FC<DualChatViewProps> = ({
       }
     }
   };
-
-  const geminiModelsList = [
-    { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash (Rápido)' },
-    { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro (Razonamiento)' },
-    { id: 'gemini-3.1-flash-image', name: 'Gemini Flash Image (Visual)' },
-  ];
-
-  const chatgptModelsList = [
-    { id: 'gpt-4o', name: 'GPT-4o (Omni Visión)' },
-    { id: 'gpt-4o-mini', name: 'GPT-4o Mini (Veloz)' },
-    { id: 'dall-e-3', name: 'DALL-E 3 (Generador)' },
-  ];
 
   return (
     <div className="flex flex-col h-[750px] bg-neutral-950 border border-neutral-800 rounded-2xl overflow-hidden shadow-2xl">
@@ -149,22 +223,77 @@ export const DualChatView: React.FC<DualChatViewProps> = ({
               <div className="w-7 h-7 rounded-lg bg-blue-500/15 border border-blue-500/30 flex items-center justify-center text-blue-400">
                 <Sparkles className="w-4 h-4" />
               </div>
-              <div>
+              <div className="relative" ref={geminiMenuRef}>
                 <div className="flex items-center space-x-2">
                   <h3 className="text-xs font-bold text-neutral-100">Google Gemini</h3>
                   <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
                 </div>
-                <select
-                  value={geminiModel}
-                  onChange={(e) => setGeminiModel(e.target.value)}
-                  className="bg-transparent text-[11px] text-blue-400/90 font-medium focus:outline-none cursor-pointer hover:underline"
+
+                <button
+                  type="button"
+                  onClick={() => setIsGeminiMenuOpen(!isGeminiMenuOpen)}
+                  className="mt-0.5 inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full bg-neutral-800 hover:bg-neutral-750 text-[11px] text-neutral-200 font-medium border border-neutral-700 transition-colors shadow-sm cursor-pointer"
+                  title="Seleccionar modelo oficial de Google Gemini"
                 >
-                  {geminiModelsList.map((m) => (
-                    <option key={m.id} value={m.id} className="bg-neutral-900 text-neutral-200">
-                      {m.name}
-                    </option>
-                  ))}
-                </select>
+                  <span className="font-semibold text-neutral-100">
+                    {(GEMINI_OFFICIAL_MODELS.find((m) => m.id === geminiModel) || GEMINI_OFFICIAL_MODELS[1]).name}
+                  </span>
+                  {(GEMINI_OFFICIAL_MODELS.find((m) => m.id === geminiModel) || GEMINI_OFFICIAL_MODELS[1]).badge && (
+                    <span className="px-1.5 py-0.2 text-[9px] font-semibold bg-neutral-700 text-neutral-200 rounded-full border border-neutral-600">
+                      {(GEMINI_OFFICIAL_MODELS.find((m) => m.id === geminiModel) || GEMINI_OFFICIAL_MODELS[1]).badge}
+                    </span>
+                  )}
+                  <ChevronDown className={`w-3 h-3 text-neutral-400 transition-transform duration-200 ${isGeminiMenuOpen ? 'rotate-180' : ''}`} />
+                </button>
+
+                {/* Popover Menu matching Google official Gemini UI */}
+                {isGeminiMenuOpen && (
+                  <div className="absolute left-0 top-full mt-2 w-72 bg-[#1e1f20] border border-[#3c4043] rounded-2xl p-1.5 shadow-2xl z-50">
+                    {GEMINI_OFFICIAL_MODELS.map((item) => {
+                      const isSelected = geminiModel === item.id;
+                      return (
+                        <React.Fragment key={item.id}>
+                          {item.isExtended && <div className="my-1 border-t border-[#3c4043]" />}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setGeminiModel(item.id);
+                              setIsGeminiMenuOpen(false);
+                            }}
+                            className={`w-full text-left p-2.5 rounded-xl transition-colors flex items-start space-x-2.5 cursor-pointer ${
+                              isSelected
+                                ? 'bg-[#282a2c] text-white'
+                                : 'hover:bg-[#282a2c]/60 text-neutral-200'
+                            }`}
+                          >
+                            <div className="w-4 pt-0.5 flex justify-center text-blue-400">
+                              {isSelected ? (
+                                <Check className="w-4 h-4 text-blue-400 stroke-[2.5]" />
+                              ) : (
+                                <div className="w-4" />
+                              )}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center justify-between">
+                                <span className={`text-xs font-semibold ${isSelected ? 'text-white' : 'text-neutral-200'}`}>
+                                  {item.name}
+                                </span>
+                                {item.badge && (
+                                  <span className="px-2 py-0.5 text-[10px] font-medium bg-[#2d2f31] text-neutral-300 rounded-full border border-neutral-600/80">
+                                    {item.badge}
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-[11px] text-neutral-400 mt-0.5">
+                                {item.subtitle}
+                              </p>
+                            </div>
+                          </button>
+                        </React.Fragment>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             </div>
 
@@ -242,6 +371,20 @@ export const DualChatView: React.FC<DualChatViewProps> = ({
                       {/* Message body */}
                       <p className="whitespace-pre-wrap">{msg.content}</p>
 
+                      {msg.isError && (
+                        <div className="mt-2.5 pt-2 border-t border-red-800/40 flex items-center justify-between">
+                          <button
+                            type="button"
+                            onClick={() => onSendToGeminiOnly(currentPrompt || 'Analiza y restaura este retrato fotográfico con máxima fidelidad')}
+                            className="px-2.5 py-1 rounded-lg bg-red-900/80 hover:bg-red-800 text-red-100 text-[11px] font-medium flex items-center space-x-1.5 transition-colors border border-red-700 shadow-sm cursor-pointer"
+                          >
+                            <RefreshCw className="w-3 h-3 text-red-200" />
+                            <span>Reintentar envío</span>
+                          </button>
+                          <span className="text-[10px] text-red-300/70">Reintento rápido</span>
+                        </div>
+                      )}
+
                       {/* Rendered image from Gemini if present */}
                       {msg.generatedImage && (
                         <div className="mt-3 rounded-xl overflow-hidden border border-neutral-700/80 bg-black/40">
@@ -304,22 +447,77 @@ export const DualChatView: React.FC<DualChatViewProps> = ({
               <div className="w-7 h-7 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400 font-bold text-xs">
                 ⚡
               </div>
-              <div>
+              <div className="relative" ref={chatgptMenuRef}>
                 <div className="flex items-center space-x-2">
                   <h3 className="text-xs font-bold text-neutral-100">OpenAI ChatGPT</h3>
                   <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
                 </div>
-                <select
-                  value={chatgptModel}
-                  onChange={(e) => setChatgptModel(e.target.value)}
-                  className="bg-transparent text-[11px] text-emerald-400/90 font-medium focus:outline-none cursor-pointer hover:underline"
+
+                <button
+                  type="button"
+                  onClick={() => setIsChatgptMenuOpen(!isChatgptMenuOpen)}
+                  className="mt-0.5 inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full bg-neutral-800 hover:bg-neutral-750 text-[11px] text-neutral-200 font-medium border border-neutral-700 transition-colors shadow-sm cursor-pointer"
+                  title="Seleccionar modelo de OpenAI ChatGPT"
                 >
-                  {chatgptModelsList.map((m) => (
-                    <option key={m.id} value={m.id} className="bg-neutral-900 text-neutral-200">
-                      {m.name}
-                    </option>
-                  ))}
-                </select>
+                  <span className="font-semibold text-neutral-100">
+                    {(CHATGPT_OFFICIAL_MODELS.find((m) => m.id === chatgptModel) || CHATGPT_OFFICIAL_MODELS[0]).name}
+                  </span>
+                  <span className="text-[10px] text-neutral-400 hidden sm:inline">
+                    · {(CHATGPT_OFFICIAL_MODELS.find((m) => m.id === chatgptModel) || CHATGPT_OFFICIAL_MODELS[0]).reasoningLabel}
+                  </span>
+                  <ChevronDown
+                    className={`w-3 h-3 text-neutral-400 transition-transform duration-200 ${
+                      isChatgptMenuOpen ? 'rotate-180' : ''
+                    }`}
+                  />
+                </button>
+
+                {/* Popover Menu matching OpenAI ChatGPT UI from screenshot */}
+                {isChatgptMenuOpen && (
+                  <div className="absolute left-0 top-full mt-2 w-64 bg-[#232323] border border-[#383838] rounded-2xl p-1.5 shadow-2xl z-50 animate-in fade-in zoom-in-95 duration-150">
+                    {CHATGPT_OFFICIAL_MODELS.map((item, idx) => {
+                      const isSelected = chatgptModel === item.id;
+                      return (
+                        <React.Fragment key={item.id}>
+                          {idx === 2 && <div className="my-1 border-t border-[#383838]" />}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setChatgptModel(item.id);
+                              setIsChatgptMenuOpen(false);
+                            }}
+                            className={`w-full text-left px-3.5 py-2.5 rounded-xl transition-colors flex items-center justify-between cursor-pointer ${
+                              isSelected
+                                ? 'bg-[#303030] text-white'
+                                : 'hover:bg-[#2c2c2c] text-neutral-200'
+                            }`}
+                          >
+                            <div className="flex-1 min-w-0 pr-2">
+                              <div className="flex items-center space-x-2">
+                                <span className={`text-xs font-semibold ${isSelected ? 'text-white' : 'text-neutral-200'}`}>
+                                  {item.name}
+                                </span>
+                                {item.badge && (
+                                  <span className="px-1.5 py-0.2 text-[9px] font-semibold bg-emerald-950/80 text-emerald-300 rounded-full border border-emerald-700/60">
+                                    {item.badge}
+                                  </span>
+                                )}
+                              </div>
+                              {item.subtitle && (
+                                <p className="text-[10px] text-neutral-400 mt-0.5 truncate">
+                                  {item.subtitle}
+                                </p>
+                              )}
+                            </div>
+                            {isSelected && (
+                              <Check className="w-4 h-4 text-white stroke-[2.5] shrink-0" />
+                            )}
+                          </button>
+                        </React.Fragment>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             </div>
 
@@ -396,6 +594,20 @@ export const DualChatView: React.FC<DualChatViewProps> = ({
 
                       {/* Message body */}
                       <p className="whitespace-pre-wrap">{msg.content}</p>
+
+                      {msg.isError && (
+                        <div className="mt-2.5 pt-2 border-t border-red-800/40 flex items-center justify-between">
+                          <button
+                            type="button"
+                            onClick={() => onSendToChatgptOnly(currentPrompt || 'Analiza y restaura este retrato fotográfico con máxima fidelidad')}
+                            className="px-2.5 py-1 rounded-lg bg-red-900/80 hover:bg-red-800 text-red-100 text-[11px] font-medium flex items-center space-x-1.5 transition-colors border border-red-700 shadow-sm cursor-pointer"
+                          >
+                            <RefreshCw className="w-3 h-3 text-red-200" />
+                            <span>Reintentar envío</span>
+                          </button>
+                          <span className="text-[10px] text-red-300/70">Reintento rápido</span>
+                        </div>
+                      )}
 
                       {/* Copy button */}
                       {!isUser && (

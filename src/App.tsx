@@ -19,6 +19,29 @@ import { UploadZone } from './components/UploadZone';
 import { PromptEditor, MASTER_PROMPT_DEFAULT } from './components/PromptEditor';
 import { DualChatView } from './components/DualChatView';
 import { DualAuthModal } from './components/DualAuthModal';
+import { optimizeImageForAi } from './utils/imageOptimizer';
+
+async function parseSafeJsonResponse(res: Response, serviceName: string) {
+  const rawText = await res.text();
+  try {
+    const data = JSON.parse(rawText);
+    if (!res.ok) {
+      throw new Error(data.error || `Error en ${serviceName} (HTTP ${res.status})`);
+    }
+    return data;
+  } catch (err: any) {
+    if (!res.ok) {
+      if (res.status === 502 || res.status === 503) {
+        throw new Error(`El servidor se estaba reiniciando temporalmente. Por favor, reintenta enviar tu mensaje ahora.`);
+      }
+      if (res.status === 413) {
+        throw new Error('La imagen original era demasiado pesada para la red. La estamos optimizando automáticamente para que viaje sin problemas.');
+      }
+      throw new Error(`Error en el servidor de ${serviceName} (código ${res.status}). Por favor reintenta.`);
+    }
+    throw new Error(`Respuesta no procesable del servidor (${err.message}). Por favor reintenta.`);
+  }
+}
 
 const DEFAULT_AUTH: DualAuthState = {
   gemini: {
@@ -41,16 +64,16 @@ const INITIAL_GEMINI_MESSAGE: ChatMessage = {
   content:
     '¡Hola! Soy Google Gemini. Puedo analizar tu retrato con visión computacional de alta resolución, restaurar detalles faciales perdidos con fidelidad absoluta y aplicar estilos de época fotográfica (85mm, Kodachrome, daguerrotipo).\n\nHaz clic en cualquier foto de ejemplo a la izquierda o escribe un mensaje para enviarlo en paralelo.',
   timestamp: Date.now(),
-  model: 'gemini-3.8-flash',
+  model: '3.8 Flash',
 };
 
 const INITIAL_CHATGPT_MESSAGE: ChatMessage = {
   id: 'c-welcome',
   sender: 'chatgpt',
   content:
-    '¡Hola! Soy ChatGPT con GPT-4o. Estoy configurado para examinar fotos antiguas, diagnosticar velos sepia, grano y arañazos, y guiar remasterizaciones ópticas de nivel profesional.\n\nAl seleccionar una muestra o escribir en la barra inferior, recibiré tu prompt simultáneamente junto a Gemini.',
+    '¡Hola! Soy ChatGPT con GPT-5.6 Sol y GPT-5.5. Cuento con esfuerzo de razonamiento profundo para examinar fotos antiguas, diagnosticar velos sepia, grano y arañazos, y guiar remasterizaciones ópticas de nivel profesional.\n\nAl seleccionar una muestra o escribir en la barra inferior, recibiré tu prompt simultáneamente junto a Gemini.',
   timestamp: Date.now(),
-  model: 'gpt-4o',
+  model: 'GPT-5.6 Sol',
 };
 
 export default function App() {
@@ -69,7 +92,7 @@ export default function App() {
 
   // Model selectors
   const [geminiModel, setGeminiModel] = useState('gemini-3.8-flash');
-  const [chatgptModel, setChatgptModel] = useState('gpt-4o');
+  const [chatgptModel, setChatgptModel] = useState('gpt-5.6-sol');
 
   // Auth State
   const [authState, setAuthState] = useState<DualAuthState>(() => {
@@ -102,24 +125,31 @@ export default function App() {
       image: imageToUse || undefined,
       timestamp: Date.now(),
     };
-    setGeminiMessages((prev) => [...prev, userMsg]);
+    setGeminiMessages((prev) => [...prev.filter((m) => !m.isError), userMsg]);
 
     try {
+      let finalImage = imageToUse;
+      if (finalImage && finalImage.length > 600_000) {
+        try {
+          const opt = await optimizeImageForAi(finalImage);
+          finalImage = opt.dataUrl;
+        } catch (e) {
+          console.warn('Pre-optimization fallback', e);
+        }
+      }
+
       const res = await fetch('/api/chat/gemini', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: promptText,
-          image: imageToUse,
+          image: finalImage,
           model: geminiModel,
           customKey: authState.gemini.apiKey || undefined,
         }),
       });
 
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Error al comunicarse con Gemini');
-      }
+      const data = await parseSafeJsonResponse(res, 'Google Gemini');
 
       const botMsg: ChatMessage = {
         id: 'g-' + Date.now(),
@@ -156,24 +186,31 @@ export default function App() {
       image: imageToUse || undefined,
       timestamp: Date.now(),
     };
-    setChatgptMessages((prev) => [...prev, userMsg]);
+    setChatgptMessages((prev) => [...prev.filter((m) => !m.isError), userMsg]);
 
     try {
+      let finalImage = imageToUse;
+      if (finalImage && finalImage.length > 600_000) {
+        try {
+          const opt = await optimizeImageForAi(finalImage);
+          finalImage = opt.dataUrl;
+        } catch (e) {
+          console.warn('Pre-optimization fallback', e);
+        }
+      }
+
       const res = await fetch('/api/chat/chatgpt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: promptText,
-          image: imageToUse,
+          image: finalImage,
           model: chatgptModel,
           customKey: authState.chatgpt.apiKey || undefined,
         }),
       });
 
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Error al comunicarse con ChatGPT');
-      }
+      const data = await parseSafeJsonResponse(res, 'OpenAI ChatGPT');
 
       const botMsg: ChatMessage = {
         id: 'c-' + Date.now(),

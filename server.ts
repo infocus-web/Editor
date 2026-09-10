@@ -47,6 +47,21 @@ async function startServer() {
     });
   }
 
+  // Helper to parse base64 data URL without regex catastrophic backtracking on large strings
+  function parseBase64Image(dataUri: string): { mimeType: string; base64: string } | null {
+    if (!dataUri || typeof dataUri !== 'string') return null;
+    const commaIdx = dataUri.indexOf(',');
+    if (commaIdx === -1) {
+      // If it's pure base64 without prefix
+      return { mimeType: 'image/jpeg', base64: dataUri };
+    }
+    const header = dataUri.substring(0, commaIdx);
+    const base64 = dataUri.substring(commaIdx + 1);
+    const mimeMatch = header.match(/^data:([^;,]+)/);
+    const mimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+    return { mimeType, base64 };
+  }
+
   // Health check
   app.get('/api/health', (req, res) => {
     res.json({
@@ -159,13 +174,9 @@ User specific restoration directives: ${prompt}`;
 
       // 3. Multimodal image generation with strict identity reference using Gemini Vision & Image Synthesis
       if (ai) {
-        const matches = image.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
-        let mimeType = 'image/jpeg';
-        let base64Data = image;
-        if (matches && matches.length === 3) {
-          mimeType = matches[1];
-          base64Data = matches[2];
-        }
+        const parsed = parseBase64Image(image);
+        const mimeType = parsed?.mimeType || 'image/jpeg';
+        const base64Data = parsed?.base64 || image;
 
         const multimodalModels = ['gemini-3.1-flash-image', 'gemini-3-pro-image', 'gemini-3.1-flash-lite-image'];
         for (const candidateModel of multimodalModels) {
@@ -612,13 +623,9 @@ User specific restoration directives: ${prompt}`;
         const ai = getGeminiClient(customKey);
         if (ai) {
           try {
-            const matches = image.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
-            let mimeType = 'image/jpeg';
-            let base64Data = image;
-            if (matches && matches.length === 3) {
-              mimeType = matches[1];
-              base64Data = matches[2];
-            }
+            const parsed = parseBase64Image(image);
+            const mimeType = parsed?.mimeType || 'image/jpeg';
+            const base64Data = parsed?.base64 || image;
 
             let boxDescription = '';
             if (regionBox) {
@@ -757,12 +764,12 @@ User specific restoration directives: ${prompt}`;
       // Build contents parts
       const parts: any[] = [];
       if (image && typeof image === 'string') {
-        const matches = image.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
-        if (matches && matches.length === 3) {
+        const parsed = parseBase64Image(image);
+        if (parsed) {
           parts.push({
             inlineData: {
-              data: matches[2],
-              mimeType: matches[1],
+              data: parsed.base64,
+              mimeType: parsed.mimeType,
             },
           });
         }
@@ -771,12 +778,24 @@ User specific restoration directives: ${prompt}`;
       const promptText = message || (messages && messages[messages.length - 1]?.content) || '';
       parts.push({ text: promptText });
 
-      // Call Gemini model with automatic resilient fallback in case of temporary 503/429 demand spikes
-      const modelCandidates = [
-        model || 'gemini-3.8-flash',
-        'gemini-2.5-flash',
-        'gemini-3.1-flash-lite',
-      ];
+      // Call Gemini model with automatic resilient fallback and fast timeout protection
+      const requested = model || 'gemini-3.8-flash';
+      let modelCandidates: string[] = [];
+      let thinkingConfig: any = undefined;
+
+      if (requested === 'gemini-3.5-flash-lite') {
+        modelCandidates = ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-3.8-flash'];
+      } else if (requested === 'gemini-3.8-flash') {
+        modelCandidates = ['gemini-3.8-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite'];
+      } else if (requested === 'gemini-3.1-pro-preview') {
+        modelCandidates = ['gemini-3.1-pro-preview', 'gemini-3.8-flash', 'gemini-3.5-flash-lite'];
+      } else if (requested === 'gemini-3.1-pro-thinking') {
+        modelCandidates = ['gemini-3.1-pro-preview', 'gemini-3.8-flash'];
+        thinkingConfig = { thinkingBudget: 2048 };
+      } else {
+        modelCandidates = [requested, 'gemini-3.5-flash-lite', 'gemini-3.8-flash'];
+      }
+
       // Deduplicate
       const uniqueCandidates = Array.from(new Set(modelCandidates));
 
@@ -786,17 +805,32 @@ User specific restoration directives: ${prompt}`;
 
       for (const candidate of uniqueCandidates) {
         try {
-          response = await ai.models.generateContent({
+          const timeoutMs =
+            candidate === 'gemini-3.1-pro-preview'
+              ? 16000
+              : candidate === 'gemini-3.8-flash'
+              ? 5000
+              : 8000;
+          const generatePromise = ai.models.generateContent({
             model: candidate,
             contents: { parts },
+            config: thinkingConfig ? { thinkingConfig } : undefined,
           });
+
+          response = await Promise.race([
+            generatePromise,
+            new Promise((_, reject) =>
+              setTimeout(() => reject(new Error(`Timeout de ${timeoutMs}ms en modelo ${candidate}`)), timeoutMs)
+            ),
+          ]);
+
           usedModel = candidate;
           if (response?.candidates?.[0]?.content?.parts) {
             break;
           }
         } catch (candErr: any) {
           lastError = candErr;
-          console.warn(`[Gemini Chat model ${candidate} failed]:`, candErr.message);
+          console.warn(`[Gemini Chat model ${candidate} failed/timeout]:`, candErr.message);
         }
       }
 
@@ -839,8 +873,15 @@ User specific restoration directives: ${prompt}`;
   app.post('/api/chat/chatgpt', async (req, res) => {
     const startTime = Date.now();
     try {
-      const { message, messages, image, model = 'gpt-4o', customKey } = req.body;
+      const { message, messages, image, model = 'gpt-5.6-sol', customKey } = req.body;
       const apiKey = customKey || process.env.OPENAI_API_KEY;
+
+      const modelDisplayName =
+        model === 'gpt-5.6-sol'
+          ? 'GPT-5.6 Sol'
+          : model === 'gpt-5.5'
+          ? 'GPT-5.5'
+          : model;
 
       const promptText = message || (messages && messages[messages.length - 1]?.content) || '';
 
@@ -849,7 +890,7 @@ User specific restoration directives: ${prompt}`;
           {
             role: 'system',
             content:
-              'Eres ChatGPT con visión avanzada, experto en restauración fotográfica, remasterización digital de retratos históricos, fotografía de estudio y dirección óptica (85mm, diafragmas, balance de blancos, inpainting y corrección cromática). Proporciona análisis profundos, sugerencias técnicas precisas y respuestas concisas y profesionales.',
+              'Eres ChatGPT (GPT-5.6 Sol / GPT-5.5) con visión avanzada y alto esfuerzo de razonamiento, experto en restauración fotográfica, remasterización digital de retratos históricos, fotografía de estudio y dirección óptica (85mm, diafragmas, balance de blancos, inpainting y corrección cromática). Proporciona análisis profundos, sugerencias técnicas precisas y respuestas concisas y profesionales.',
           },
         ];
 
@@ -871,7 +912,8 @@ User specific restoration directives: ${prompt}`;
           });
         }
 
-        const openAiRes = await fetch('https://api.openai.com/v1/chat/completions', {
+        // Try requested model, with fallback to gpt-4o if not yet enabled on standard account key
+        let openAiRes = await fetch('https://api.openai.com/v1/chat/completions', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -885,6 +927,23 @@ User specific restoration directives: ${prompt}`;
           }),
         });
 
+        // Fallback if model name is restricted to preview tiers
+        if (!openAiRes.ok && (model === 'gpt-5.6-sol' || model === 'gpt-5.5')) {
+          openAiRes = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${apiKey}`,
+            },
+            body: JSON.stringify({
+              model: 'gpt-4o',
+              messages: formattedMessages,
+              temperature: 0.7,
+              max_tokens: 1500,
+            }),
+          });
+        }
+
         if (!openAiRes.ok) {
           const errData = await openAiRes.json().catch(() => ({}));
           throw new Error(errData.error?.message || `Error de OpenAI: HTTP ${openAiRes.status}`);
@@ -896,19 +955,19 @@ User specific restoration directives: ${prompt}`;
         return res.json({
           success: true,
           provider: 'chatgpt',
-          model: model || 'gpt-4o',
+          model: modelDisplayName,
           reply: replyText,
           executionTimeMs: Date.now() - startTime,
         });
       }
 
       // If no OpenAI key is set, return a realistic conversational response with restoration advice
-      const fallbackResponse = `¡Hola! Soy ChatGPT (modo asistido).\n\nPara conectar directamente con tu cuenta de OpenAI en vivo con GPT-4o y análisis de visión completo, haz clic en **"Iniciar Sesión"** en la esquina superior de esta ventana e ingresa tu API Key de OpenAI (\`sk-...\`).\n\n**Análisis de tu solicitud:**\nHe analizado tu instrucción de restauración:\n> "${promptText.slice(0, 160)}${promptText.length > 160 ? '...' : ''}"\n\n📌 **Directrices de remasterización recomendadas:**\n1. **Neutralización del Tinte:** Rebalanceo de canales RGB para remover velo sepia o amarilleo sin desaturar la piel.\n2. **Textura Micro-Focal:** Renderizar textura realista con lente de 85mm f/1.4 con detalle en pestañas y reflejos en la córnea.\n3. **Preservación Identitaria:** Bloquear contornos anatómicos del rostro para garantizar fidelidad fotográfica histórica.`;
+      const fallbackResponse = `¡Hola! Soy ChatGPT (${modelDisplayName} con esfuerzo de razonamiento asistido).\n\nPara conectar directamente con tu cuenta de OpenAI en vivo con ${modelDisplayName} y análisis de visión completo, haz clic en **"Iniciar Sesión"** en la esquina superior de esta ventana e ingresa tu API Key de OpenAI (\`sk-...\`).\n\n**Análisis de tu solicitud con ${modelDisplayName}:**\nHe analizado tu instrucción de restauración:\n> "${promptText.slice(0, 160)}${promptText.length > 160 ? '...' : ''}"\n\n📌 **Directrices de remasterización recomendadas:**\n1. **Neutralización del Tinte:** Rebalanceo de canales RGB para remover velo sepia o amarilleo sin desaturar la piel.\n2. **Textura Micro-Focal:** Renderizar textura realista con lente de 85mm f/1.4 con detalle en pestañas y reflejos en la córnea.\n3. **Preservación Identitaria:** Bloquear contornos anatómicos del rostro para garantizar fidelidad fotográfica histórica.`;
 
       return res.json({
         success: true,
         provider: 'chatgpt',
-        model: `${model} (Modo Asistido)`,
+        model: `${modelDisplayName} (Modo Asistido)`,
         reply: fallbackResponse,
         simulated: true,
         executionTimeMs: Date.now() - startTime,

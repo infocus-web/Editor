@@ -2,6 +2,17 @@ import { SamplePortrait } from '../types';
 
 export const SAMPLE_PORTRAITS: SamplePortrait[] = [
   {
+    id: 'sample-girl-dslr-85mm',
+    title: 'Retrato Niña DSLR 85mm',
+    era: 'Vintage Remaster',
+    damage: 'Tinte magenta & vestido vintage',
+    styleTag: 'DSLR 85mm f/1.8 Prime',
+    url: 'https://images.unsplash.com/photo-1516627145497-ae6968895b74?w=800&auto=format&fit=crop&q=85',
+    recommendedPromptAddon: 'Retrato DSLR 85mm f/1.8 de niña rubia, ojos nítidos, corrección de tinte magenta y bokeh de jardín.',
+    fullPrompt:
+      'A high-resolution, professional DSLR portrait of the young girl in the reference image. Maintain strict facial feature fidelity, exact eye shape, iris color, nose contour, and mouth expression from the original photo to preserve identity perfectly. Realistic photographic textures: natural human skin with subtle pores and freckles, finely detailed individual strands of blonde hair, soft natural daylight with a slight catchlight in the eyes. Shot on an 85mm f/1.8 prime lens, sharp focal point on the eyes and face, creamy bokeh and smooth depth-of-field in the garden background, true-to-life color grading eliminating vintage magenta cast, clean white balance, realistic fabric folds on the ruffled dress.',
+  },
+  {
     id: 'sample-1',
     title: 'Retrato de Época 1930',
     era: 'Años 30',
