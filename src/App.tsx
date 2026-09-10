@@ -92,7 +92,7 @@ export default function App() {
 
   useEffect(() => {
     let cancelled = false;
-    fetch('/api/health')
+    fetch('/api/health', { cache: 'no-store' })
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
       .then((health) => {
         if (cancelled) return;
@@ -107,7 +107,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [isAuthModalOpen]);
 
   // Dispatch message to Gemini
   const sendToGemini = async (promptText: string, imageToUse: string | null) => {
