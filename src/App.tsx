@@ -29,13 +29,14 @@ import { ProviderCard } from './components/ProviderCard';
 import { SettingsModal } from './components/SettingsModal';
 import { LightboxModal } from './components/LightboxModal';
 import { RegionEditorModal } from './components/RegionEditorModal';
+import { ExecutionSpeedSummary } from './components/ExecutionSpeedSummary';
 import { simulateRestoration } from './utils/imageSimulation';
 import { SAMPLE_PORTRAITS } from './utils/samples';
 
 const INITIAL_PROVIDERS: ProviderId[] = ['google', 'openai', 'stability', 'replicate'];
 
 const PROVIDER_INFO: Record<ProviderId, { name: string; model: string }> = {
-  google: { name: 'Google Imagen 3', model: 'gemini-3.1-flash-lite-image / Imagen' },
+  google: { name: 'Google Imagen 3', model: 'imagen-3.0-generate-002' },
   openai: { name: 'OpenAI DALL-E 3', model: 'dall-e-3 / gpt-image' },
   stability: { name: 'Stability AI', model: 'SD3.5 Large / SDXL' },
   replicate: { name: 'Replicate (CodeFormer)', model: 'sczhou/codeformer' },
@@ -51,6 +52,8 @@ export default function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isGeneratingAll, setIsGeneratingAll] = useState(false);
   const [winnerId, setWinnerId] = useState<string | null>(null);
+  const [activeStyleTitle, setActiveStyleTitle] = useState<string | null>(null);
+  const [lastPastedSampleTitle, setLastPastedSampleTitle] = useState<string | null>(null);
 
   // User API Keys stored in localStorage
   const [apiKeys, setApiKeys] = useState<UserApiKeys>({
@@ -143,11 +146,29 @@ export default function App() {
     });
   };
 
-  const handleSelectSample = (sample: SamplePortrait) => {
+  // When clicking an example image: only generate and paste its specialized prompt into the prompt box
+  const handleApplySamplePrompt = (sample: SamplePortrait) => {
+    setSelectedSampleId(sample.id);
+    setPrompt(sample.fullPrompt);
+    setActiveStyleTitle(sample.title);
+    setLastPastedSampleTitle(sample.title);
+
+    // Copy to clipboard as bonus convenience
+    if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(sample.fullPrompt).catch(() => {});
+    }
+
+    // Auto-clear toast notice after 3 seconds
+    setTimeout(() => {
+      setLastPastedSampleTitle((prev) => (prev === sample.title ? null : prev));
+    }, 3000);
+  };
+
+  // Optional: only if user explicitly clicks "Cargar foto" to test with the sample image
+  const handleLoadSampleImage = (sample: SamplePortrait) => {
     setSelectedSampleId(sample.id);
     setImageMeta({ name: sample.title, size: 'Muestra Web' });
 
-    // Convert sample url to base64 via canvas for reliable upload
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload = () => {
@@ -162,10 +183,6 @@ export default function App() {
       }
     };
     img.src = sample.url;
-
-    if (sample.recommendedPromptAddon && !prompt.includes(sample.recommendedPromptAddon)) {
-      setPrompt(`${MASTER_PROMPT_DEFAULT}\n\nNota de preservación: ${sample.recommendedPromptAddon}`);
-    }
   };
 
   // Concurrent Execution via Promise.allSettled
@@ -457,8 +474,10 @@ export default function App() {
                   setImageMeta(null);
                   setSelectedSampleId(null);
                 }}
-                onSelectSample={handleSelectSample}
+                onApplySamplePrompt={handleApplySamplePrompt}
+                onLoadSampleImage={handleLoadSampleImage}
                 selectedSampleId={selectedSampleId}
+                lastPastedSampleTitle={lastPastedSampleTitle}
               />
             </div>
 
@@ -466,8 +485,17 @@ export default function App() {
             <div className="p-4 rounded-2xl bg-neutral-900/60 border border-neutral-800/80 shadow-sm">
               <PromptEditor
                 prompt={prompt}
-                onChange={setPrompt}
-                onReset={() => setPrompt(MASTER_PROMPT_DEFAULT)}
+                onChange={(newVal) => {
+                  setPrompt(newVal);
+                  if (activeStyleTitle && newVal !== prompt) {
+                    setActiveStyleTitle(null);
+                  }
+                }}
+                onReset={() => {
+                  setPrompt(MASTER_PROMPT_DEFAULT);
+                  setActiveStyleTitle(null);
+                }}
+                activeStyleTitle={activeStyleTitle}
               />
             </div>
 
@@ -510,6 +538,13 @@ export default function App() {
 
           {/* Right Column: Split Screen Comparison Grid (7 cols) */}
           <div className="lg:col-span-7 space-y-4">
+            {/* Speed & Execution Time Benchmark Bar Chart */}
+            <ExecutionSpeedSummary
+              selectedProviders={selectedProviders}
+              providerResults={providerResults}
+              isGenerating={isGeneratingAll}
+            />
+
             {/* Dashboard Header Bar */}
             <div className="flex items-center justify-between p-3.5 rounded-2xl bg-neutral-900/60 border border-neutral-800/80">
               <div className="flex items-center space-x-2">

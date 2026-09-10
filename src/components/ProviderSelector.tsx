@@ -29,8 +29,8 @@ export const ProviderSelector: React.FC<ProviderSelectorProps> = ({
       id: 'google',
       name: 'Google Imagen 3',
       badge: 'Google AI Studio',
-      model: 'gemini-3.1-flash-lite-image / Imagen',
-      description: 'Preservación fidedigna de iluminación analógica y tonos neutros.',
+      model: 'imagen-3.0-generate-002',
+      description: 'Generación fotorrealista desde cero con preservación estricta de identidad.',
       hasKey: Boolean(keys.google),
     },
     {

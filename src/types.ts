@@ -37,6 +37,8 @@ export interface SamplePortrait {
   damage: string;
   url: string;
   recommendedPromptAddon?: string;
+  fullPrompt: string;
+  styleTag?: string;
 }
 
 export interface LightboxState {

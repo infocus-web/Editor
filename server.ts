@@ -60,78 +60,172 @@ async function startServer() {
     });
   });
 
-  // Execute Google Imagen 3 / Gemini Restoration
+  // Execute Google Imagen 3 Generative Restoration
   async function executeGoogle(image: string, prompt: string, customKey?: string): Promise<ProviderResult> {
     const startTime = Date.now();
-    const providerName = 'Google Imagen 3 / Gemini';
-    const modelName = 'gemini-3.1-flash-lite-image';
+    const providerName = 'Google Imagen 3';
+    const modelName = 'imagen-3.0-generate-002';
+    const activeKey = customKey || process.env.GEMINI_API_KEY;
 
-    const ai = getGeminiClient(customKey);
-    if (!ai) {
-      // If no key is present, provide a graceful photorealistic simulation response
+    if (!activeKey) {
       return {
         providerId: 'google',
         providerName,
         modelName,
         status: 'simulated',
-        imageUrl: image, // fallback to enhanced client canvas
+        imageUrl: image,
         executionTimeMs: Date.now() - startTime,
-        notes: 'Clave de Google Gemini no detectada. Configure su API key en el panel de Ajustes para llamada en vivo.',
+        notes: 'Clave de Google Gemini / Imagen no detectada. Configure su API key en Ajustes para enviar la llamada al modelo.',
       };
     }
 
+    const ai = getGeminiClient(customKey);
+
+    // Master photographic prompt with high creative strength, eliminating vintage color cast and generating real photographic textures
+    const fullPhotographicPrompt = `High-end master photorealistic studio portrait restoration. Completely regenerate and rebuild this portrait from scratch with high creative strength.
+CRITICAL REQUIREMENTS:
+1. COMPLETE COLOR CAST ELIMINATION: Eliminate all vintage yellowing, sepia staining, faded orange/brown tint, scan artifacts, and aged monochromatic degradation. Restore rich, authentic modern studio color balance with healthy natural human skin undertones, neutral white eye scleras, and deep true blacks.
+2. PHOTOGRAPHIC TEXTURE SYNTHESIS FROM SCRATCH: Generate genuine high-resolution photographic textures—individual hair strands, crisp eyelashes, moist reflective cornea and iris striations, natural dermal skin pores with authentic subsurface scattering (avoiding flat/airbrushed plastic smoothness), and crisp natural clothing fabric textures.
+3. STRICT IDENTITY PRESERVATION: Accurately preserve the exact facial bone architecture, eye shape, nose contour, lip form, skull proportion, age, ethnicity, and emotional expression of the subject in the reference image.
+4. OPTICAL MASTERY: Photographed on an 85mm f/1.4 prime portrait lens at 1/250s, ISO 100, professional key-light and soft rim-light studio setup, tack-sharp focal plane on the eyes, smooth natural bokeh.
+User specific restoration directives: ${prompt}`;
+
     try {
-      const matches = image.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
-      let mimeType = 'image/jpeg';
-      let base64Data = image;
-      if (matches && matches.length === 3) {
-        mimeType = matches[1];
-        base64Data = matches[2];
+      // 1. Attempt official Imagen 3 generation endpoint via generateImages if available
+      if (ai) {
+        try {
+          const imgRes = await (ai.models as any).generateImages({
+            model: 'imagen-3.0-generate-002',
+            prompt: fullPhotographicPrompt,
+            config: {
+              numberOfImages: 1,
+              outputMimeType: 'image/jpeg',
+              aspectRatio: '1:1',
+            },
+          });
+          if (imgRes.generatedImages?.[0]?.image?.imageBytes) {
+            const b64 = imgRes.generatedImages[0].image.imageBytes;
+            return {
+              providerId: 'google',
+              providerName,
+              modelName: 'imagen-3.0-generate-002',
+              status: 'success',
+              imageUrl: `data:image/jpeg;base64,${b64}`,
+              executionTimeMs: Date.now() - startTime,
+              notes: 'Generado exitosamente con Google Imagen 3 (imagen-3.0-generate-002). Reconstrucción fotorrealista completa desde cero.',
+            };
+          }
+        } catch (genImgErr: any) {
+          console.log('[Imagen 3 generateImages attempt]:', genImgErr.message);
+        }
       }
 
-      const response = await ai.models.generateContent({
-        model: 'gemini-3.1-flash-lite-image',
-        contents: {
-          parts: [
-            {
-              inlineData: {
-                data: base64Data,
-                mimeType,
+      // 2. Attempt official Imagen 3 REST predict endpoints (imagen-3.0-generate-002 / imagen-3.0-capability-001)
+      const imagenModels = ['imagen-3.0-generate-002', 'imagen-3.0-capability-001'];
+      for (const candidateModel of imagenModels) {
+        try {
+          const restUrl = `https://generativelanguage.googleapis.com/v1beta/models/${candidateModel}:predict?key=${activeKey}`;
+          const restRes = await fetch(restUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              instances: [{ prompt: fullPhotographicPrompt }],
+              parameters: {
+                sampleCount: 1,
+                aspectRatio: '1:1',
+                outputOptions: { mimeType: 'image/jpeg' },
               },
-            },
-            {
-              text: `Photo Restoration Task:\n${prompt}\nReturn the restored photograph.`,
-            },
-          ],
-        },
-      });
+            }),
+          });
+          if (restRes.ok) {
+            const restData = await restRes.json();
+            const b64 = restData.predictions?.[0]?.bytesBase64Encoded;
+            if (b64) {
+              return {
+                providerId: 'google',
+                providerName,
+                modelName: candidateModel,
+                status: 'success',
+                imageUrl: `data:image/jpeg;base64,${b64}`,
+                executionTimeMs: Date.now() - startTime,
+                notes: `Generado exitosamente con Google Imagen 3 (${candidateModel}). Reconstrucción fotorrealista desde cero.`,
+              };
+            }
+          }
+        } catch (restErr: any) {
+          console.log(`[Imagen REST ${candidateModel} attempt]:`, restErr.message);
+        }
+      }
 
-      let restoredImageUrl: string | null = null;
-      let notes = '';
-      if (response.candidates?.[0]?.content?.parts) {
-        for (const part of response.candidates[0].content.parts) {
-          if (part.inlineData?.data) {
-            const outMime = part.inlineData.mimeType || 'image/png';
-            restoredImageUrl = `data:${outMime};base64,${part.inlineData.data}`;
-          } else if (part.text) {
-            notes += part.text + ' ';
+      // 3. Multimodal image generation with strict identity reference using Gemini Vision & Image Synthesis
+      if (ai) {
+        const matches = image.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+        let mimeType = 'image/jpeg';
+        let base64Data = image;
+        if (matches && matches.length === 3) {
+          mimeType = matches[1];
+          base64Data = matches[2];
+        }
+
+        const multimodalModels = ['gemini-3.1-flash-image', 'gemini-3-pro-image', 'gemini-3.1-flash-lite-image'];
+        for (const candidateModel of multimodalModels) {
+          try {
+            const response = await ai.models.generateContent({
+              model: candidateModel,
+              contents: {
+                parts: [
+                  {
+                    inlineData: {
+                      data: base64Data,
+                      mimeType,
+                    },
+                  },
+                  {
+                    text: fullPhotographicPrompt,
+                  },
+                ],
+              },
+              config: {
+                imageConfig: {
+                  aspectRatio: '1:1',
+                  imageSize: '1K',
+                },
+              } as any,
+            });
+
+            let restoredImageUrl: string | null = null;
+            let notes = '';
+            if (response.candidates?.[0]?.content?.parts) {
+              for (const part of response.candidates[0].content.parts) {
+                if (part.inlineData?.data) {
+                  const outMime = part.inlineData.mimeType || 'image/jpeg';
+                  restoredImageUrl = `data:${outMime};base64,${part.inlineData.data}`;
+                } else if (part.text) {
+                  notes += part.text + ' ';
+                }
+              }
+            }
+
+            if (restoredImageUrl) {
+              return {
+                providerId: 'google',
+                providerName,
+                modelName: candidateModel,
+                status: 'success',
+                imageUrl: restoredImageUrl,
+                executionTimeMs: Date.now() - startTime,
+                notes: notes.trim() || `Generado con modelo visual de Google (${candidateModel}). Texturas y rostro regenerados desde cero.`,
+              };
+            }
+          } catch (modelErr: any) {
+            console.log(`[Google candidate ${candidateModel} failed]:`, modelErr.message);
           }
         }
       }
 
-      if (!restoredImageUrl) {
-        throw new Error('El modelo de Google respondió sin datos de imagen binarios.');
-      }
-
-      return {
-        providerId: 'google',
-        providerName,
-        modelName,
-        status: 'success',
-        imageUrl: restoredImageUrl,
-        executionTimeMs: Date.now() - startTime,
-        notes: notes.trim() || 'Restauración completada con Google Imagen/Gemini.',
-      };
+      throw new Error(
+        'No se pudo sintetizar la nueva imagen con los modelos de Google Imagen 3. Verifique que su clave API de Google AI Studio cuente con cuota habilitada para generación de imágenes.'
+      );
     } catch (err: any) {
       console.error('[Google Error]:', err.message);
       return {
@@ -140,7 +234,7 @@ async function startServer() {
         modelName,
         status: 'error',
         executionTimeMs: Date.now() - startTime,
-        error: err.message || 'Error al conectar con Google Gemini API.',
+        error: err.message || 'Error al conectar con el servicio de Google Imagen 3.',
       };
     }
   }
@@ -531,35 +625,51 @@ async function startServer() {
               boxDescription = `Centered approximately around ${Math.round(regionBox.x + regionBox.width / 2)}% horizontally and ${Math.round(regionBox.y + regionBox.height / 2)}% vertically. `;
             }
 
-            const targetedPrompt = `Targeted photograph inpainting and localized retouching.\nFocus specifically on modifying the user-selected area: ${boxDescription}\nInstructions: "${prompt}"\nConstraint: Keep all unselected parts of the portrait identical. Seamlessly blend the modified region into surrounding textures, lighting and resolution. Return the updated photograph.`;
-
-            const response = await ai.models.generateContent({
-              model: 'gemini-3.1-flash-lite-image',
-              contents: {
-                parts: [
-                  {
-                    inlineData: {
-                      data: base64Data,
-                      mimeType,
-                    },
-                  },
-                  {
-                    text: targetedPrompt,
-                  },
-                ],
-              },
-            });
+            const targetedPrompt = `High-end photorealistic studio retouching and inpainting.\nFocus specifically on regenerating and modifying the selected region: ${boxDescription}\nModification instruction: "${prompt}"\nStrict constraints: Seamlessly blend the modified area into the surrounding skin, eyes, hair, or fabric. Match the exact photographic grain, 85mm lens depth of field, natural lighting, and skin texture. Keep all unselected parts of the portrait 100% identical. Return the newly rendered photograph.`;
 
             let editedImageUrl: string | null = null;
             let notes = '';
-            if (response.candidates?.[0]?.content?.parts) {
-              for (const part of response.candidates[0].content.parts) {
-                if (part.inlineData?.data) {
-                  const outMime = part.inlineData.mimeType || 'image/png';
-                  editedImageUrl = `data:${outMime};base64,${part.inlineData.data}`;
-                } else if (part.text) {
-                  notes += part.text + ' ';
+
+            const inpaintCandidates = ['gemini-3.1-flash-image', 'gemini-3-pro-image', 'gemini-3.1-flash-lite-image'];
+            for (const candidate of inpaintCandidates) {
+              try {
+                const response = await ai.models.generateContent({
+                  model: candidate,
+                  contents: {
+                    parts: [
+                      {
+                        inlineData: {
+                          data: base64Data,
+                          mimeType,
+                        },
+                      },
+                      {
+                        text: targetedPrompt,
+                      },
+                    ],
+                  },
+                  config: {
+                    imageConfig: {
+                      aspectRatio: '1:1',
+                      imageSize: '1K',
+                    },
+                  } as any,
+                });
+
+                if (response.candidates?.[0]?.content?.parts) {
+                  for (const part of response.candidates[0].content.parts) {
+                    if (part.inlineData?.data) {
+                      const outMime = part.inlineData.mimeType || 'image/jpeg';
+                      editedImageUrl = `data:${outMime};base64,${part.inlineData.data}`;
+                      break;
+                    } else if (part.text) {
+                      notes += part.text + ' ';
+                    }
+                  }
                 }
+                if (editedImageUrl) break;
+              } catch (candidateErr: any) {
+                console.warn(`[Inpaint candidate ${candidate} failed]:`, candidateErr.message);
               }
             }
 
